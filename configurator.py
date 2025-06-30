@@ -3,6 +3,36 @@ from dataclasses import dataclass
 import yaml, jinja2, jsonschema, pathlib
 from reynolds import FlowState, calculate_reynolds
 
+
+class ConfigBuilder:
+    """Collects configuration data for FENSAP."""
+
+    def __init__(self, calculator=calculate_reynolds):
+        self.calculator = calculator
+        self.cfg: dict[str, float | int | str] = {}
+
+    def derive(self, case: "Case") -> dict:
+        """Map high-level case data to configuration entries."""
+        re = self.calculator(case.flow)
+
+        self.cfg["PWS_POL_REYNOLDS"] = re
+        self.cfg["PWS_PSI_REYNOLDS"] = re
+        self.cfg["ICE_REYNOLDS_NUMBER"] = re
+        self.cfg["FSP_REYNOLDS_NUMBER"] = re
+
+        self.cfg["PWS_POL_MACH"] = case.mach
+        self.cfg["PWS_POL_ALPHA_START"] = case.alpha_start
+        self.cfg["PWS_POL_ALPHA_END"] = case.alpha_end
+
+        levels = {"coarse": 8, "medium": 16, "fine": 32}
+        self.cfg["PWS_REFINEMENT"] = levels[case.grid_level]
+
+        self.cfg["ICE_DROP_DIAM"] = case.drop_mvd * 1e6  # µm
+        self.cfg["ICE_LIQ_H2O_CONTENT"] = case.lwc
+
+        # …weiteres Mapping hier…
+        return self.cfg
+
 # ---------- 1. High-Level Spec ----------------------------------------------
 @dataclass
 class Case:
@@ -15,26 +45,10 @@ class Case:
     grid_level: str = "coarse"  # coarse | medium | fine
 
 # ---------- 2. Regeln / Ableitungen -----------------------------------------
-def derive(case: Case) -> dict:
-    """Mappt High-Level-Speck auf FENSAP-Variablendschungel."""
-    cfg = {}
-
-    # Beispiel: Profil-Polaren
-    cfg["PWS_POL_REYNOLDS"] = calculate_reynolds(case.flow)
-    cfg["PWS_POL_MACH"]     = case.mach
-    cfg["PWS_POL_ALPHA_START"] = case.alpha_start
-    cfg["PWS_POL_ALPHA_END"]   = case.alpha_end
-
-    # Gitter-Auflösung
-    levels = {"coarse": 8, "medium": 16, "fine": 32}
-    cfg["PWS_REFINEMENT"] = levels[case.grid_level]
-
-    # Icing-Zeug
-    cfg["ICE_DROP_DIAM"]     = case.drop_mvd*1e6   # µm
-    cfg["ICE_LIQ_H2O_CONTENT"] = case.lwc
-
-    # …weiteres Mapping hier…
-    return cfg
+def derive(case: Case, calculator=calculate_reynolds) -> dict:
+    """Mappt High-Level-Spec auf FENSAP-Variablendschungel."""
+    builder = ConfigBuilder(calculator)
+    return builder.derive(case)
 
 # ---------- 3. Rendern via Jinja-Template ------------------------------------
 def render_fensap(cfg: dict, template_path="template.j2") -> str:
