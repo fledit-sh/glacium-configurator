@@ -59,11 +59,15 @@ def render_fensap(cfg: dict, template_path="template.j2") -> str:
 
 # ---------- 4. Vollpipeline ---------------------------------------------------
 def build(casefile: str, outfile="icing.def"):
-    data = yaml.safe_load(open(casefile))
-    flow = FlowState(**data.pop("flow"))
-    case = Case(flow=flow, **data)
-    raw  = derive(case)
-    open(outfile, "w").write(render_fensap(raw))
+    """Read a YAML case description and render the FENSAP configuration."""
+    with open(casefile, "r", encoding="utf-8") as fh:
+        case_dict = yaml.safe_load(fh)
+
+    flow = FlowState(**case_dict.pop("flow"))
+    case = Case(flow=flow, **case_dict)
+
+    raw = derive(case)
+    pathlib.Path(outfile).write_text(render_fensap(raw))
     print(f"✅  {outfile} geschrieben.")
 
 if __name__ == "__main__":
