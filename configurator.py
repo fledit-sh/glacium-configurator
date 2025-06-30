@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 import yaml, jinja2, jsonschema, pathlib
+from reynolds import FlowState, calculate_reynolds
 
 # ---------- 1. High-Level Spec ----------------------------------------------
 @dataclass
 class Case:
     mach: float
-    reynolds: float
+    flow: FlowState
     alpha_start: int
     alpha_end: int
     lwc: float                # liquid water content [kg/m³]
@@ -19,7 +20,7 @@ def derive(case: Case) -> dict:
     cfg = {}
 
     # Beispiel: Profil-Polaren
-    cfg["PWS_POL_REYNOLDS"] = case.reynolds
+    cfg["PWS_POL_REYNOLDS"] = calculate_reynolds(case.flow)
     cfg["PWS_POL_MACH"]     = case.mach
     cfg["PWS_POL_ALPHA_START"] = case.alpha_start
     cfg["PWS_POL_ALPHA_END"]   = case.alpha_end
@@ -44,7 +45,9 @@ def render_fensap(cfg: dict, template_path="template.j2") -> str:
 
 # ---------- 4. Vollpipeline ---------------------------------------------------
 def build(casefile: str, outfile="icing.def"):
-    case = Case(**yaml.safe_load(open(casefile)))
+    data = yaml.safe_load(open(casefile))
+    flow = FlowState(**data.pop("flow"))
+    case = Case(flow=flow, **data)
     raw  = derive(case)
     open(outfile, "w").write(render_fensap(raw))
     print(f"✅  {outfile} geschrieben.")
