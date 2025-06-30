@@ -18,7 +18,7 @@ def calculate_reynolds(flow: FlowState) -> float:
     solver = FormulaSolver(ReynoldsNumber())
     return solver.solve({
         'rho': flow.rho,
-        'velocity': flow.velocity,
-        'characteristic_length': flow.chord,
+        'V': flow.velocity,
+        'c': flow.chord,
         'mu': flow.mu,
     })
