@@ -1,0 +1,6 @@
+package: ""
+PWS_PROFILE1: ../profiles/densened.dat
+PWS_PROFILE2: ../profiles/thickened.dat
+PWS_INI_NUM_PANELS: 400
+PWS_TE_GAP: 0.00232018561
+PWS_TE_BLENDING: 0.6
