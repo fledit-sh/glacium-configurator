@@ -441,7 +441,8 @@ def merge_zones(
     elem_list: list[np.ndarray] = []
     offset = 0
     prev_end = None
-    for z in wall_zones:
+    for z_idx, z in enumerate(wall_zones, start=1):
+        z_title = getattr(z, "title", "")
         # ``read_solution`` filters each zone by ``z`` and remaps its
         # connectivity.  The merged edges below therefore operate directly on
         # these filtered nodes.
@@ -452,8 +453,9 @@ def merge_zones(
                 "run a boundary-extraction step to obtain open boundary edges"
             )
         if n_endpoints == 0:
+            title_info = f" ({z_title})" if z_title else ""
             raise ValueError(
-                "Zone has no endpoints; "
+                f"Zone {z_idx}{title_info} has no endpoints; "
                 "run a boundary-extraction step to generate boundary edges"
             )
         if n_endpoints != 2:
