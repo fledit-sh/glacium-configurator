@@ -14,6 +14,9 @@ def _node(x):
     return [x, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
 
 
+import pytest
+
+
 def test_merge_zones_single_closed_loop():
     xs = [1.0, 0.0, -1.0, 0.0]
     nodes = np.array([_node(x) for x in xs])
@@ -31,10 +34,8 @@ def test_merge_zones_single_closed_loop():
         "w": 7,
     }
 
-    x_closed, y_closed, cp_closed = merge_zones([zone], [], var_map)
-    assert x_closed.shape[0] == len(xs) + 1
-    assert x_closed[0] == max(xs)
-    assert np.allclose(cp_closed, 0.0)
+    with pytest.raises(ValueError, match="closed loop"):
+        merge_zones([zone], [], var_map)
 
 
 def test_merge_zones_multiple_closed_loops():
@@ -60,6 +61,5 @@ def test_merge_zones_multiple_closed_loops():
         "w": 7,
     }
 
-    x_closed, y_closed, cp_closed = merge_zones([zone1, zone2], [], var_map)
-    assert x_closed.shape[0] == len(xs1) + len(xs2) + 1
-    assert np.allclose(cp_closed, 0.0)
+    with pytest.raises(ValueError, match="closed loop"):
+        merge_zones([zone1, zone2], [], var_map)
