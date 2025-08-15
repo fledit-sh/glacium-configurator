@@ -16,6 +16,11 @@ from collections import defaultdict
 # Additional markers can be added to this list as needed.
 WALL_KEYWORDS = ("wall", "surface", "solid")
 
+# Zonetype values that represent surface elements. For these zones the
+# element connectivity describes faces and must be reduced to boundary edges
+# before further processing.
+SURFACE_ZONETYPES = {"FEQUADRILATERAL", "FETRIANGLE"}
+
 
 def _normalize(name: str) -> str:
     """Normalize a Tecplot variable name for lookup.
@@ -231,19 +236,30 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
         if is_wall:
             mask = node_vals[:, z_idx] <= z_threshold + tol
             nodes = node_vals[mask]
+            elem_arr = None
             if conn_vals is not None:
                 idx_map = {old: new for new, old in enumerate(np.where(mask)[0])}
-                new_elems = []
+                new_elems: list[list[int]] = []
                 for elem in conn_vals:
                     elem = [int(n) for n in elem]
                     if all(mask[n] for n in elem):
                         new_elems.append([idx_map[n] for n in elem])
-                # Ensure downstream code receives either a 2-D array or None.
-                elem_arr = (
-                    np.array(new_elems, dtype=int) if new_elems else None
-                )
-            else:
-                elem_arr = None
+                if new_elems:
+                    if zonetype in SURFACE_ZONETYPES:
+                        edge_counts: dict[tuple[int, int], int] = defaultdict(int)
+                        for elem in new_elems:
+                            for a, b in zip(elem, elem[1:]):
+                                edge = tuple(sorted((a, b)))
+                                edge_counts[edge] += 1
+                        boundary_edges = [
+                            edge
+                            for edge, count in edge_counts.items()
+                            if count == 1 and edge[0] != edge[1]
+                        ]
+                        if boundary_edges:
+                            elem_arr = np.array(boundary_edges, dtype=int)
+                    else:
+                        elem_arr = np.array(new_elems, dtype=int)
             wall_nodes += nodes.shape[0]
             wall_zones.append(SimpleNamespace(nodes=nodes, elem=elem_arr))
 
