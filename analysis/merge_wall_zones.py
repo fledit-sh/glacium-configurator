@@ -38,20 +38,23 @@ def read_solution(path: Path):
             continue
         n_nodes = int(match.group(1))
 
-        # Extract zone title, if any
+        # Extract zone title, if any, and determine if this is a wall zone
         title_match = re.search(r'T="([^"]+)"', header)
         title = title_match.group(1) if title_match else ""
+        is_wall = "wall" in title.lower() or idx in known_wall_indices
 
-        # Concatenate all data lines for this zone and parse numbers
+        # Skip parsing data for non-wall zones entirely
+        if not is_wall:
+            continue
+
+        # Concatenate all data lines for this wall zone and parse numbers
         data_lines = lines[start + 1 : end]
         text = "".join(line.rstrip("\n") for line in data_lines)
         values = np.fromstring(text, sep=" ")
 
         # Reshape into (n_nodes, n_vars) and discard any extra values (e.g. connectivity)
         zone_data = values[: n_nodes * n_vars].reshape(n_nodes, n_vars)
-
-        if "wall" in title.lower() or idx in known_wall_indices:
-            wall_data.append(zone_data)
+        wall_data.append(zone_data)
 
     if not wall_data:
         return np.empty((0, n_vars))
