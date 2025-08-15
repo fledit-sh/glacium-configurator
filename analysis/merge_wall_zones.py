@@ -57,7 +57,7 @@ def expected_nodes_per_element(zonetype: str) -> int:
 def order_zone(z: SimpleNamespace, x_idx: int, y_idx: int) -> np.ndarray:
     X = z.nodes[:, x_idx]
     Y = z.nodes[:, y_idx]
-    if z.elem is not None:
+    if z.elem is not None and z.elem.ndim == 2 and z.elem.size > 0:
         if z.elem.shape[1] == 2:
             ord_idx = order_points_from_lineseg(len(X), z.elem)
         else:
@@ -137,7 +137,10 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
                 elem = [int(n) for n in elem]
                 if all(mask[n] for n in elem):
                     new_elems.append([idx_map[n] for n in elem])
-            elem_arr = np.array(new_elems, dtype=int)
+            # Ensure downstream code receives either a 2-D array or None.
+            elem_arr = (
+                np.array(new_elems, dtype=int) if new_elems else None
+            )
         else:
             elem_arr = None
         wall_nodes += nodes.shape[0]
