@@ -1,6 +1,6 @@
-import sys
 import re
 from pathlib import Path
+import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,11 +21,25 @@ def read_solution(path: Path):
     data = values[: n_nodes * n_vars].reshape(n_nodes, n_vars)
     return data
 
+def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
+    """Write arrays to Tecplot ASCII file."""
+    with open(path, 'w') as f:
+        f.write('TITLE = "Merged Wall Cp"\n')
+        f.write('VARIABLES = "X" "Y" "Cp"\n')
+        f.write(f'ZONE T="MergedWall", I={len(x)}, DATAPACKING=POINT\n')
+        for xi, yi, ci in zip(x, y, cp):
+            f.write(f"{xi} {yi} {ci}\n")
+
+
 def main():
-    if len(sys.argv) < 2:
-        print('Usage: python merge_wall_zones.py <solution.dat>')
-        return
-    data = read_solution(Path(sys.argv[1]))
+    parser = argparse.ArgumentParser(
+        description='Extract wall nodes and compute surface pressure coefficient.'
+    )
+    parser.add_argument('solution', type=Path, help='Path to the solution .dat file')
+    parser.add_argument('--out', type=Path, help='Optional Tecplot output file')
+    args = parser.parse_args()
+
+    data = read_solution(args.solution)
     x, y, z = data[:, 0], data[:, 1], data[:, 2]
     rho, p = data[:, 3], data[:, 4]
     v1, v2, v3 = data[:, 5], data[:, 6], data[:, 7]
@@ -55,6 +69,9 @@ def main():
     ax2.invert_yaxis()
     ax2.set_title('Surface Cp')
     fig2.savefig('surface_cp.png')
+
+    if args.out:
+        write_tecplot(args.out, x_wall[order], y_wall[order], cp_wall[order])
 
     # Show figures if interactive backend is available
     try:
