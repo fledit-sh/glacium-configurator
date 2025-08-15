@@ -16,6 +16,7 @@ def test_quadrilateral_wall_zone_boundary_has_two_endpoints():
     zone = wall_zones[0]
     # Boundary edges should reduce the single quadrilateral to three segments
     assert zone.elem.shape == (3, 2)
-    order, n_endpoints = walk_zone_nodes(zone)
+    order, n_endpoints, is_closed = walk_zone_nodes(zone)
     assert np.array_equal(order, np.array([0, 1, 2, 3]))
     assert n_endpoints == 2
+    assert not is_closed
