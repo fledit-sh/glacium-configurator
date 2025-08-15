@@ -54,12 +54,20 @@ def expected_nodes_per_element(zonetype: str) -> int:
     }.get((zonetype or "").upper(), -1)
 
 
-def walk_zone_nodes(z: SimpleNamespace) -> np.ndarray:
-    """Return node indices by walking element connectivity sequentially."""
+def walk_zone_nodes(z: SimpleNamespace) -> tuple[np.ndarray, int]:
+    """Return ordered node indices and the count of degree-1 nodes.
+
+    The element connectivity may describe multiple disconnected segments.  All
+    segments are walked in a deterministic order by computing connected
+    components and traversing each component sequentially.  Nodes that do not
+    participate in any element are included at the end in their original index
+    order.  The second value returned is the number of nodes with degree one
+    ("endpoints").
+    """
 
     n_nodes = len(z.nodes)
     if z.elem is None or z.elem.ndim != 2 or z.elem.size == 0:
-        return np.arange(n_nodes, dtype=int)
+        return np.arange(n_nodes, dtype=int), 0
 
     # Build adjacency from element connectivity.  Each element contributes
     # edges between successive nodes and is closed if it has more than two
@@ -74,25 +82,58 @@ def walk_zone_nodes(z: SimpleNamespace) -> np.ndarray:
             adj[nodes[0]].append(nodes[-1])
             adj[nodes[-1]].append(nodes[0])
 
-    start = int(z.elem[0][0])
-    order = [start]
-    current = start
-    visited_edges: set[tuple[int, int]] = set()
-    while True:
-        neighbors = adj[current]
-        next_node = None
-        for n in neighbors:
-            edge = tuple(sorted((current, n)))
-            if edge not in visited_edges:
-                visited_edges.add(edge)
-                next_node = n
-                break
-        if next_node is None or next_node == start:
-            break
-        order.append(next_node)
-        current = next_node
+    degree1_count = sum(1 for neighbors in adj.values() if len(neighbors) == 1)
 
-    return np.array(order, dtype=int)
+    visited_nodes: set[int] = set()
+    order: list[int] = []
+
+    for node in range(n_nodes):
+        if node in visited_nodes:
+            continue
+
+        if node not in adj:
+            # Isolated node with no connectivity.
+            order.append(node)
+            visited_nodes.add(node)
+            continue
+
+        # Discover the full connected component for this node.
+        stack = [node]
+        component: set[int] = {node}
+        visited_nodes.add(node)
+        while stack:
+            cur = stack.pop()
+            for nb in adj[cur]:
+                if nb not in visited_nodes:
+                    visited_nodes.add(nb)
+                    component.add(nb)
+                    stack.append(nb)
+
+        # Choose a starting node: prefer an endpoint if present for deterministic
+        # traversal of open paths; otherwise use the smallest index.
+        endpoint_candidates = [n for n in component if len(adj[n]) == 1]
+        start = min(endpoint_candidates) if endpoint_candidates else min(component)
+
+        comp_order = [start]
+        current = start
+        visited_edges: set[tuple[int, int]] = set()
+        while True:
+            neighbors = adj[current]
+            next_node = None
+            for n in neighbors:
+                edge = tuple(sorted((current, n)))
+                if edge not in visited_edges:
+                    visited_edges.add(edge)
+                    next_node = n
+                    break
+            if next_node is None or next_node == start:
+                break
+            comp_order.append(next_node)
+            current = next_node
+
+        order.extend(comp_order)
+
+    return np.array(order, dtype=int), degree1_count
 
 
 def filter_nodes_by_z(
@@ -319,7 +360,7 @@ def main():
         offset = 0
         prev_end = None
         for z in wall_zones:
-            local_order = walk_zone_nodes(z)
+            local_order, _ = walk_zone_nodes(z)
             ordered_nodes = z.nodes[local_order]
             n = ordered_nodes.shape[0]
             start_global = offset
@@ -347,7 +388,7 @@ def main():
         all_nodes, all_elem = filter_nodes_by_z(all_nodes, all_elem, z_idx)
 
         merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
-        ord_idx = walk_zone_nodes(merged_zone)
+        ord_idx, _ = walk_zone_nodes(merged_zone)
         nodes = all_nodes[ord_idx]
 
         x = nodes[:, x_idx]
