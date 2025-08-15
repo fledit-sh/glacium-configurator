@@ -143,6 +143,28 @@ def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
             f.write(f"{xi} {yi} {ci}\n")
 
 
+def plot_airfoil_geometry(x: np.ndarray, y: np.ndarray, path: Path) -> None:
+    fig, ax = plt.subplots()
+    ax.scatter(x, y, s=5)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("Airfoil geometry (z<=0)")
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def plot_surface_cp(x: np.ndarray, cp: np.ndarray, path: Path) -> None:
+    fig, ax = plt.subplots()
+    ax.plot(x, cp)
+    ax.set_xlabel("x")
+    ax.set_ylabel("Cp")
+    ax.invert_yaxis()
+    ax.set_title("Surface Cp")
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Extract wall nodes and compute surface pressure coefficient."
@@ -164,6 +186,7 @@ def main():
     args = parser.parse_args()
 
     prefix = args.solution.stem
+    out_dir = args.out.parent if args.out else args.solution.parent
 
     def process(sol_path: Path) -> None:
         wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices = read_solution(
@@ -192,55 +215,38 @@ def main():
         p_inf = first[p_idx]
         u_inf = float(np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2))
 
-        xs: list[np.ndarray] = []
-        ys: list[np.ndarray] = []
-        cps: list[np.ndarray] = []
-
+        nodes_list: list[np.ndarray] = []
+        elem_list: list[np.ndarray] = []
+        offset = 0
         for z in wall_zones:
-            ord_idx = order_zone(z, x_idx, y_idx)
-            nodes = z.nodes[ord_idx]
-            x = nodes[:, x_idx]
-            y = nodes[:, y_idx]
-            p = nodes[:, p_idx]
-            cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
-            xs.append(x)
-            ys.append(y)
-            cps.append(cp)
+            nodes_list.append(z.nodes)
+            if z.elem is not None:
+                elem_list.append(z.elem + offset)
+            offset += z.nodes.shape[0]
 
-        x = np.concatenate(xs)
-        y = np.concatenate(ys)
-        cp = np.concatenate(cps)
+        all_nodes = np.concatenate(nodes_list)
+        all_elem = np.concatenate(elem_list) if elem_list else None
 
-        fig1, ax1 = plt.subplots()
-        ax1.scatter(x, y, s=5)
-        ax1.set_aspect("equal", adjustable="box")
-        ax1.set_xlabel("x")
-        ax1.set_ylabel("y")
-        ax1.set_title("Airfoil geometry (z<=0)")
-        fig1.savefig(f"{prefix}_airfoil_geometry.png")
+        merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
+        ord_idx = order_zone(merged_zone, x_idx, y_idx)
+        nodes = all_nodes[ord_idx]
+
+        x = nodes[:, x_idx]
+        y = nodes[:, y_idx]
+        p = nodes[:, p_idx]
+        cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
 
         x_closed = np.append(x, x[0])
         y_closed = np.append(y, y[0])
         cp_closed = np.append(cp, cp[0])
 
-        fig2, ax2 = plt.subplots()
-        ax2.plot(x_closed, cp_closed)
-        ax2.set_xlabel("x")
-        ax2.set_ylabel("Cp")
-        ax2.invert_yaxis()
-        ax2.set_title("Surface Cp")
-        fig2.savefig(f"{prefix}_surface_cp.png")
+        geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
+        cp_path = out_dir / f"{prefix}_surface_cp.png"
+        plot_airfoil_geometry(x_closed, y_closed, geom_path)
+        plot_surface_cp(x_closed, cp_closed, cp_path)
 
         if args.out:
             write_tecplot(args.out, x_closed, y_closed, cp_closed)
-
-        try:
-            plt.show()
-        except Exception:
-            pass
-        finally:
-            plt.close(fig1)
-            plt.close(fig2)
 
     sol_path = args.solution
     if sol_path.suffix.lower() == ".zip":
