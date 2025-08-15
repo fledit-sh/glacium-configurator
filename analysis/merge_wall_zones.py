@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 import argparse
 from types import SimpleNamespace
+import tempfile
+import zipfile
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -248,78 +250,96 @@ def main():
     )
     args = parser.parse_args()
 
-    wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices = read_solution(
-        args.solution, args.z_threshold, args.tolerance
-    )
-    print(
-        f"Total nodes: {total_nodes}, wall nodes: {wall_nodes}, "
-        f"excluded: {total_nodes - wall_nodes}"
-    )
-    print(f"Detected wall zone indices: {wall_zone_indices}")
+    prefix = args.solution.stem
 
-    if not wall_zones:
-        return
+    def process(sol_path: Path) -> None:
+        wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices = read_solution(
+            sol_path, args.z_threshold, args.tolerance
+        )
+        print(
+            f"Total nodes: {total_nodes}, wall nodes: {wall_nodes}, "
+            f"excluded: {total_nodes - wall_nodes}"
+        )
+        print(f"Detected wall zone indices: {wall_zone_indices}")
 
-    idx = lambda *names: _get_var_index(var_map, list(names))
-    x_idx = idx("x")
-    y_idx = idx("y")
-    p_idx = idx("pressure", "p")
-    rho_idx = idx("density", "rho")
-    u_idx = idx("u", "velocityx", "xvelocity")
-    v_idx = idx("v", "velocityy", "yvelocity")
-    w_idx = idx("w", "velocityz", "zvelocity")
+        if not wall_zones:
+            return
 
-    first = wall_zones[0].nodes[0]
-    rho_inf = first[rho_idx]
-    p_inf = first[p_idx]
-    u_inf = float(np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2))
+        idx = lambda *names: _get_var_index(var_map, list(names))
+        x_idx = idx("x")
+        y_idx = idx("y")
+        p_idx = idx("pressure", "p")
+        rho_idx = idx("density", "rho")
+        u_idx = idx("u", "velocityx", "xvelocity")
+        v_idx = idx("v", "velocityy", "yvelocity")
+        w_idx = idx("w", "velocityz", "zvelocity")
 
-    xs: list[np.ndarray] = []
-    ys: list[np.ndarray] = []
-    cps: list[np.ndarray] = []
+        first = wall_zones[0].nodes[0]
+        rho_inf = first[rho_idx]
+        p_inf = first[p_idx]
+        u_inf = float(np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2))
 
-    for z in wall_zones:
-        ord_idx = order_zone(z, x_idx, y_idx)
-        nodes = z.nodes[ord_idx]
-        x = nodes[:, x_idx]
-        y = nodes[:, y_idx]
-        p = nodes[:, p_idx]
-        cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
-        xs.append(x)
-        ys.append(y)
-        cps.append(cp)
+        xs: list[np.ndarray] = []
+        ys: list[np.ndarray] = []
+        cps: list[np.ndarray] = []
 
-    x = np.concatenate(xs)
-    y = np.concatenate(ys)
-    cp = np.concatenate(cps)
+        for z in wall_zones:
+            ord_idx = order_zone(z, x_idx, y_idx)
+            nodes = z.nodes[ord_idx]
+            x = nodes[:, x_idx]
+            y = nodes[:, y_idx]
+            p = nodes[:, p_idx]
+            cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
+            xs.append(x)
+            ys.append(y)
+            cps.append(cp)
 
-    fig1, ax1 = plt.subplots()
-    ax1.scatter(x, y, s=5)
-    ax1.set_aspect("equal", adjustable="box")
-    ax1.set_xlabel("x")
-    ax1.set_ylabel("y")
-    ax1.set_title("Airfoil geometry (z<=0)")
-    fig1.savefig("airfoil_geometry.png")
+        x = np.concatenate(xs)
+        y = np.concatenate(ys)
+        cp = np.concatenate(cps)
 
-    x_closed = np.append(x, x[0])
-    y_closed = np.append(y, y[0])
-    cp_closed = np.append(cp, cp[0])
+        fig1, ax1 = plt.subplots()
+        ax1.scatter(x, y, s=5)
+        ax1.set_aspect("equal", adjustable="box")
+        ax1.set_xlabel("x")
+        ax1.set_ylabel("y")
+        ax1.set_title("Airfoil geometry (z<=0)")
+        fig1.savefig(f"{prefix}_airfoil_geometry.png")
 
-    fig2, ax2 = plt.subplots()
-    ax2.plot(x_closed, cp_closed)
-    ax2.set_xlabel("x")
-    ax2.set_ylabel("Cp")
-    ax2.invert_yaxis()
-    ax2.set_title("Surface Cp")
-    fig2.savefig("surface_cp.png")
+        x_closed = np.append(x, x[0])
+        y_closed = np.append(y, y[0])
+        cp_closed = np.append(cp, cp[0])
 
-    if args.out:
-        write_tecplot(args.out, x_closed, y_closed, cp_closed)
+        fig2, ax2 = plt.subplots()
+        ax2.plot(x_closed, cp_closed)
+        ax2.set_xlabel("x")
+        ax2.set_ylabel("Cp")
+        ax2.invert_yaxis()
+        ax2.set_title("Surface Cp")
+        fig2.savefig(f"{prefix}_surface_cp.png")
 
-    try:
-        plt.show()
-    except Exception:
-        pass
+        if args.out:
+            write_tecplot(args.out, x_closed, y_closed, cp_closed)
+
+        try:
+            plt.show()
+        except Exception:
+            pass
+        finally:
+            plt.close(fig1)
+            plt.close(fig2)
+
+    sol_path = args.solution
+    if sol_path.suffix.lower() == ".zip":
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(sol_path, "r") as zf:
+                zf.extractall(tmpdir)
+            dat_files = list(Path(tmpdir).rglob("*.dat"))
+            if not dat_files:
+                raise FileNotFoundError("No .dat file found in archive")
+            process(dat_files[0])
+    else:
+        process(sol_path)
 
 
 if __name__ == "__main__":
