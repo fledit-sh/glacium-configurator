@@ -142,7 +142,7 @@ def order_zone(z: SimpleNamespace, x_idx: int, y_idx: int) -> np.ndarray:
     return np.array(ord_idx, dtype=int)
 
 
-def read_solution(path: Path):
+def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
     with open(path, "r") as f:
         lines = f.readlines()
 
@@ -201,7 +201,7 @@ def read_solution(path: Path):
         else:
             conn_vals = None
 
-        mask = node_vals[:, z_idx] <= 0
+        mask = node_vals[:, z_idx] <= z_threshold + tol
         nodes = node_vals[mask]
         if conn_vals is not None:
             idx_map = {old: new for new, old in enumerate(np.where(mask)[0])}
@@ -234,9 +234,23 @@ def main():
     )
     parser.add_argument("solution", type=Path, help="Path to the solution .dat file")
     parser.add_argument("--out", type=Path, help="Optional Tecplot output file")
+    parser.add_argument(
+        "--z-threshold",
+        type=float,
+        default=0.0,
+        help="Z cutoff for wall extraction (uses Z <= threshold + tol)",
+    )
+    parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.0,
+        help="Additional tolerance added to z-threshold",
+    )
     args = parser.parse_args()
 
-    wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices = read_solution(args.solution)
+    wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices = read_solution(
+        args.solution, args.z_threshold, args.tolerance
+    )
     print(
         f"Total nodes: {total_nodes}, wall nodes: {wall_nodes}, "
         f"excluded: {total_nodes - wall_nodes}"
