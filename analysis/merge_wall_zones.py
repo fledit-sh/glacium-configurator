@@ -5,21 +5,58 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 def read_solution(path: Path):
-    with open(path, 'r') as f:
+    """Read solution file and return wall node data.
+
+    The Tecplot solution file may contain several zones.  Wall data are stored
+    either in zones whose titles contain the word ``wall`` or in known index
+    positions.  This function iterates over every zone in the file, extracts the
+    node data for the wall zones, concatenates them and returns the resulting
+    array.
+    """
+
+    with open(path, "r") as f:
         lines = f.readlines()
-    zone_line = next(i for i, line in enumerate(lines) if line.lstrip().startswith('ZONE'))
-    match = re.search(r'N=\s*(\d+)', lines[zone_line])
-    data_lines = lines[zone_line + 1:]
-    # Join lines without newline characters so numbers split across lines are
-    # reconstructed correctly (some lines break within a number).
-    text = ''.join(line.rstrip('\n') for line in data_lines)
-    values = np.fromstring(text, sep=' ')
-    # There are 21 variables per node in the file.
-    n_vars = 21
-    n_nodes = len(values) // n_vars
-    data = values[: n_nodes * n_vars].reshape(n_nodes, n_vars)
-    return data
+
+    # Locate all ZONE headers
+    zone_starts = [i for i, line in enumerate(lines) if line.lstrip().startswith("ZONE")]
+    zone_starts.append(len(lines))  # sentinel to simplify slicing
+
+    wall_data: list[np.ndarray] = []
+    n_vars = 21  # number of variables per node
+
+    # Known wall zone indices if titles are not descriptive
+    known_wall_indices = {2, 3}
+
+    for idx, (start, end) in enumerate(zip(zone_starts, zone_starts[1:]), start=1):
+        header = lines[start]
+
+        # Extract node count from the header; skip if not present
+        match = re.search(r"N=\s*(\d+)", header)
+        if not match:
+            continue
+        n_nodes = int(match.group(1))
+
+        # Extract zone title, if any
+        title_match = re.search(r'T="([^"]+)"', header)
+        title = title_match.group(1) if title_match else ""
+
+        # Concatenate all data lines for this zone and parse numbers
+        data_lines = lines[start + 1 : end]
+        text = "".join(line.rstrip("\n") for line in data_lines)
+        values = np.fromstring(text, sep=" ")
+
+        # Reshape into (n_nodes, n_vars) and discard any extra values (e.g. connectivity)
+        zone_data = values[: n_nodes * n_vars].reshape(n_nodes, n_vars)
+
+        if "wall" in title.lower() or idx in known_wall_indices:
+            wall_data.append(zone_data)
+
+    if not wall_data:
+        return np.empty((0, n_vars))
+
+    return np.concatenate(wall_data, axis=0)
 
 def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
     """Write arrays to Tecplot ASCII file."""
