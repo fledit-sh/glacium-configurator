@@ -361,12 +361,21 @@ def merge_zones(
         # connectivity.  The merged edges below therefore operate directly on
         # these filtered nodes.
         local_order, n_endpoints, is_closed = walk_zone_nodes(z)
-        if not is_closed and n_endpoints != 2:
-            raise ValueError(f"Zone has {n_endpoints} endpoints; expected 2")
-        ordered_nodes = z.nodes[local_order]
         if is_closed:
-            break_idx = int(np.argmax(ordered_nodes[:, x_idx]))
-            ordered_nodes = np.roll(ordered_nodes, -break_idx, axis=0)
+            raise ValueError(
+                "Zone forms a closed loop; "
+                "run a boundary-extraction step to obtain open boundary edges"
+            )
+        if n_endpoints == 0:
+            raise ValueError(
+                "Zone has no endpoints; "
+                "run a boundary-extraction step to generate boundary edges"
+            )
+        if n_endpoints != 2:
+            raise ValueError(
+                f"Zone has {n_endpoints} endpoints; expected 2"
+            )
+        ordered_nodes = z.nodes[local_order]
         if ordered_nodes[-1, x_idx] > ordered_nodes[0, x_idx]:
             ordered_nodes = ordered_nodes[::-1]
         n = ordered_nodes.shape[0]
