@@ -59,20 +59,21 @@ def expected_nodes_per_element(zonetype: str) -> int:
     }.get((zonetype or "").upper(), -1)
 
 
-def walk_zone_nodes(z: SimpleNamespace) -> tuple[np.ndarray, int]:
-    """Return ordered node indices and the count of degree-1 nodes.
+def walk_zone_nodes(z: SimpleNamespace) -> tuple[np.ndarray, int, bool]:
+    """Return ordered node indices, endpoint count and closed-loop flag.
 
     The element connectivity may describe multiple disconnected segments.  All
     segments are walked in a deterministic order by computing connected
     components and traversing each component sequentially.  Nodes that do not
     participate in any element are included at the end in their original index
     order.  The second value returned is the number of nodes with degree one
-    ("endpoints").
+    ("endpoints").  If all connected nodes have degree two the third value is
+    ``True`` indicating the component(s) form a closed loop.
     """
 
     n_nodes = len(z.nodes)
     if z.elem is None or z.elem.ndim != 2 or z.elem.size == 0:
-        return np.arange(n_nodes, dtype=int), 0
+        return np.arange(n_nodes, dtype=int), 0, False
 
     # Build adjacency from element connectivity.  Each element contributes
     # edges between successive nodes and is closed if it has more than two
@@ -88,6 +89,8 @@ def walk_zone_nodes(z: SimpleNamespace) -> tuple[np.ndarray, int]:
             adj[nodes[-1]].append(nodes[0])
 
     degree1_count = sum(1 for neighbors in adj.values() if len(neighbors) == 1)
+    all_degree2 = all(len(neighbors) == 2 for neighbors in adj.values()) and bool(adj)
+    is_closed = degree1_count == 0 and all_degree2
 
     visited_nodes: set[int] = set()
     order: list[int] = []
@@ -138,7 +141,7 @@ def walk_zone_nodes(z: SimpleNamespace) -> tuple[np.ndarray, int]:
 
         order.extend(comp_order)
 
-    return np.array(order, dtype=int), degree1_count
+    return np.array(order, dtype=int), degree1_count, is_closed
 
 
 def filter_nodes_by_z(
@@ -357,10 +360,13 @@ def merge_zones(
         # ``read_solution`` filters each zone by ``z`` and remaps its
         # connectivity.  The merged edges below therefore operate directly on
         # these filtered nodes.
-        local_order, n_endpoints = walk_zone_nodes(z)
-        if n_endpoints != 2:
+        local_order, n_endpoints, is_closed = walk_zone_nodes(z)
+        if not is_closed and n_endpoints != 2:
             raise ValueError(f"Zone has {n_endpoints} endpoints; expected 2")
         ordered_nodes = z.nodes[local_order]
+        if is_closed:
+            break_idx = int(np.argmax(ordered_nodes[:, x_idx]))
+            ordered_nodes = np.roll(ordered_nodes, -break_idx, axis=0)
         if ordered_nodes[-1, x_idx] > ordered_nodes[0, x_idx]:
             ordered_nodes = ordered_nodes[::-1]
         n = ordered_nodes.shape[0]
@@ -388,7 +394,7 @@ def merge_zones(
     all_elem = np.concatenate(elem_list) if elem_list else None
 
     merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
-    ord_idx, _ = walk_zone_nodes(merged_zone)
+    ord_idx, _, _ = walk_zone_nodes(merged_zone)
     nodes = all_nodes[ord_idx]
 
     x = nodes[:, x_idx]

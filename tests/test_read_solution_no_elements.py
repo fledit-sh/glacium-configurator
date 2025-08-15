@@ -13,5 +13,7 @@ def test_read_solution_and_walk_zone_nodes_no_elements():
     assert len(wall_zones) == 1
     assert inlet_zones == []
     zone = wall_zones[0]
-    ordering = walk_zone_nodes(zone)
+    ordering, n_endpoints, is_closed = walk_zone_nodes(zone)
     assert len(ordering) == zone.nodes.shape[0]
+    assert n_endpoints == 0
+    assert not is_closed
