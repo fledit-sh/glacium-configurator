@@ -18,8 +18,20 @@ WALL_KEYWORDS = ("wall", "surface", "solid")
 
 
 def _normalize(name: str) -> str:
-    """Normalize a Tecplot variable name for lookup."""
-    return re.sub(r"\s+", "", name).lower()
+    """Normalize a Tecplot variable name for lookup.
+
+    The Tecplot exports used with this script often append units or other
+    annotations to the variable names, e.g. ``"Pressure (N/m^2)"`` or
+    ``"Cfx; Velocity"``.  For lookup purposes we only care about the base
+    name, so everything after the first space, ``(`` or ``;`` is discarded and
+    any remaining punctuation is stripped before lowering the case.
+    """
+    name = name.strip()
+    # Truncate at the first space, '(' or ';'.
+    name = re.split(r"[\s(;]", name, 1)[0]
+    # Remove all punctuation/special characters.
+    name = re.sub(r"[^A-Za-z0-9]", "", name)
+    return name.lower()
 
 
 def _get_var_index(var_map: dict[str, int], candidates: list[str]) -> int:
