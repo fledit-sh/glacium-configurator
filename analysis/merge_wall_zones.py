@@ -153,6 +153,14 @@ def filter_nodes_by_z(
 
 
 def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
+    """Parse a Tecplot solution file and extract wall and inlet zones.
+
+    Wall zones are filtered so that only nodes with ``z <= z_threshold + tol``
+    are included. Element connectivity is rebuilt to reference the filtered
+    nodes, ensuring downstream code receives zones that already honor the
+    filtering mask.
+    """
+
     with open(path, "r") as f:
         lines = f.readlines()
 
@@ -275,6 +283,9 @@ def merge_zones(
     ----------
     wall_zones : list of SimpleNamespace
         Zones containing ``nodes`` and optional ``elem`` arrays.
+        The ``nodes`` arrays must already be filtered so that only points
+        satisfying the ``z``-threshold remain; connectivity in ``elem`` should
+        reflect the filtered nodes. No additional ``z`` filtering is performed.
     inlet_zones : list of SimpleNamespace
         Zones used to estimate free–stream conditions. May be empty.
     var_map : dict
@@ -327,6 +338,9 @@ def merge_zones(
     offset = 0
     prev_end = None
     for z in wall_zones:
+        # ``read_solution`` filters each zone by ``z`` and remaps its
+        # connectivity.  The merged edges below therefore operate directly on
+        # these filtered nodes.
         local_order, n_endpoints = walk_zone_nodes(z)
         if n_endpoints != 2:
             raise ValueError(f"Zone has {n_endpoints} endpoints; expected 2")
@@ -356,8 +370,6 @@ def merge_zones(
     if prev_end is not None and all_nodes.size:
         elem_list.append(np.array([[prev_end, wall_zones[0].start]], dtype=int))
     all_elem = np.concatenate(elem_list) if elem_list else None
-
-    all_nodes, all_elem = filter_nodes_by_z(all_nodes, all_elem, z_idx)
 
     merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
     ord_idx, _ = walk_zone_nodes(merged_zone)
