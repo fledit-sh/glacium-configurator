@@ -266,6 +266,8 @@ def merge_zones(
     wall_zones: list[SimpleNamespace],
     inlet_zones: list[SimpleNamespace],
     var_map: dict[str, int],
+    closure_tol: float = 1e-6,
+    jump_threshold: float = 5.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Merge ordered wall zones and compute the closed Cp curve.
 
@@ -277,6 +279,13 @@ def merge_zones(
         Zones used to estimate free–stream conditions. May be empty.
     var_map : dict
         Mapping from normalized variable names to column indices.
+
+    closure_tol : float, optional
+        Tolerance for verifying that the start and end of the closed arrays
+        coincide. Defaults to ``1e-6``.
+    jump_threshold : float, optional
+        Maximum allowed jump between successive ``Cp`` values in the closed
+        loop. Defaults to ``5.0``.
 
     Returns
     -------
@@ -362,6 +371,23 @@ def merge_zones(
     x_closed = np.append(x, x[0])
     y_closed = np.append(y, y[0])
     cp_closed = np.append(cp, cp[0])
+
+    if abs(x_closed[0] - x_closed[-1]) > closure_tol:
+        raise ValueError(
+            f"x-coordinate loop not closed within tolerance {closure_tol}"
+        )
+    if abs(cp_closed[0] - cp_closed[-1]) > closure_tol:
+        raise ValueError(
+            f"Cp loop not closed within tolerance {closure_tol}"
+        )
+
+    max_jump = (
+        float(np.max(np.abs(np.diff(cp_closed)))) if cp_closed.size > 1 else 0.0
+    )
+    if max_jump > jump_threshold:
+        raise ValueError(
+            f"Cp jump {max_jump} exceeds threshold {jump_threshold}"
+        )
 
     return x_closed, y_closed, cp_closed
 
