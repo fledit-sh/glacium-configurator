@@ -7,8 +7,7 @@ import zipfile
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-from node_order import boundary_loop_order, nearest_neighbor_order, order_points_from_lineseg
+from collections import defaultdict
 
 
 # Keywords used to automatically identify wall zones.  The search is case
@@ -54,24 +53,45 @@ def expected_nodes_per_element(zonetype: str) -> int:
     }.get((zonetype or "").upper(), -1)
 
 
-def order_zone(z: SimpleNamespace, x_idx: int, y_idx: int) -> np.ndarray:
-    X = z.nodes[:, x_idx]
-    Y = z.nodes[:, y_idx]
-    # Some zones may declare elements but provide an empty or malformed
-    # connectivity array.  Guard against this by verifying ``elem`` is a
-    # non-empty 2-D array before accessing ``shape``.  If not, fall back to a
-    # nearest-neighbor ordering so zones with zero connectivity are still
-    # processed gracefully.
-    if z.elem is not None and z.elem.ndim == 2 and z.elem.size:
-        if z.elem.shape[1] == 2:
-            ord_idx = order_points_from_lineseg(len(X), z.elem)
-        else:
-            ord_idx = boundary_loop_order(len(X), z.elem)
-            if not ord_idx:
-                ord_idx = nearest_neighbor_order(np.column_stack([X, Y]))
-    else:
-        ord_idx = nearest_neighbor_order(np.column_stack([X, Y]))
-    return np.array(ord_idx, dtype=int)
+def walk_zone_nodes(z: SimpleNamespace) -> np.ndarray:
+    """Return node indices by walking element connectivity sequentially."""
+
+    n_nodes = len(z.nodes)
+    if z.elem is None or z.elem.ndim != 2 or z.elem.size == 0:
+        return np.arange(n_nodes, dtype=int)
+
+    # Build adjacency from element connectivity.  Each element contributes
+    # edges between successive nodes and is closed if it has more than two
+    # vertices.
+    adj: dict[int, list[int]] = defaultdict(list)
+    for elem in z.elem:
+        nodes = [int(n) for n in elem]
+        for a, b in zip(nodes, nodes[1:]):
+            adj[a].append(b)
+            adj[b].append(a)
+        if len(nodes) > 2:
+            adj[nodes[0]].append(nodes[-1])
+            adj[nodes[-1]].append(nodes[0])
+
+    start = int(z.elem[0][0])
+    order = [start]
+    current = start
+    visited_edges: set[tuple[int, int]] = set()
+    while True:
+        neighbors = adj[current]
+        next_node = None
+        for n in neighbors:
+            edge = tuple(sorted((current, n)))
+            if edge not in visited_edges:
+                visited_edges.add(edge)
+                next_node = n
+                break
+        if next_node is None or next_node == start:
+            break
+        order.append(next_node)
+        current = next_node
+
+    return np.array(order, dtype=int)
 
 
 def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
@@ -238,17 +258,35 @@ def main():
         nodes_list: list[np.ndarray] = []
         elem_list: list[np.ndarray] = []
         offset = 0
+        prev_end = None
         for z in wall_zones:
-            nodes_list.append(z.nodes)
-            if z.elem is not None:
-                elem_list.append(z.elem + offset)
-            offset += z.nodes.shape[0]
+            local_order = walk_zone_nodes(z)
+            ordered_nodes = z.nodes[local_order]
+            n = ordered_nodes.shape[0]
+            start_global = offset
+            end_global = offset + n - 1
+            z.first = start_global
+            z.last = end_global
+            nodes_list.append(ordered_nodes)
+            elem_list.append(
+                np.column_stack([
+                    np.arange(start_global, start_global + n - 1),
+                    np.arange(start_global + 1, start_global + n),
+                ])
+            )
+            if prev_end is not None:
+                elem_list.append(np.array([[prev_end, start_global]], dtype=int))
+            offset += n
+            prev_end = end_global
 
         all_nodes = np.concatenate(nodes_list)
+        # Connect final zone back to the first to close the loop
+        if prev_end is not None and all_nodes.size:
+            elem_list.append(np.array([[prev_end, 0]], dtype=int))
         all_elem = np.concatenate(elem_list) if elem_list else None
 
         merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
-        ord_idx = order_zone(merged_zone, x_idx, y_idx)
+        ord_idx = walk_zone_nodes(merged_zone)
         nodes = all_nodes[ord_idx]
 
         x = nodes[:, x_idx]

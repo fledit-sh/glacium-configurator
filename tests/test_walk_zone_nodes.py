@@ -6,29 +6,28 @@ import sys
 # Ensure modules in the analysis directory are importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from merge_wall_zones import order_zone
-from node_order import nearest_neighbor_order
+from merge_wall_zones import walk_zone_nodes
 
 
-def test_order_zone_no_elements_uses_nearest_neighbor():
+def test_walk_zone_nodes_no_elements_returns_in_order():
     nodes = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]])
     zone = SimpleNamespace(nodes=nodes, elem=None)
-    result = order_zone(zone, 0, 1)
-    expected = np.array(nearest_neighbor_order(nodes), dtype=int)
+    result = walk_zone_nodes(zone)
+    expected = np.arange(nodes.shape[0])
     assert np.array_equal(result, expected)
 
 
-def test_order_zone_empty_connectivity_falls_back_to_nearest_neighbor():
+def test_walk_zone_nodes_empty_connectivity_returns_in_order():
     nodes = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]])
     zone = SimpleNamespace(nodes=nodes, elem=np.empty((0, 2), dtype=int))
-    result = order_zone(zone, 0, 1)
-    expected = np.array(nearest_neighbor_order(nodes), dtype=int)
+    result = walk_zone_nodes(zone)
+    expected = np.arange(nodes.shape[0])
     assert np.array_equal(result, expected)
 
 
-def test_order_zone_wrong_dimensionality_falls_back_to_nearest_neighbor():
+def test_walk_zone_nodes_wrong_dimensionality_returns_in_order():
     nodes = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]])
     zone = SimpleNamespace(nodes=nodes, elem=np.array([0, 1, 2]))
-    result = order_zone(zone, 0, 1)
-    expected = np.array(nearest_neighbor_order(nodes), dtype=int)
+    result = walk_zone_nodes(zone)
+    expected = np.arange(nodes.shape[0])
     assert np.array_equal(result, expected)
