@@ -139,9 +139,19 @@ def order_zone(z: SimpleNamespace, x_idx: int, y_idx: int) -> np.ndarray:
 def read_solution(path: Path):
     with open(path, "r") as f:
         lines = f.readlines()
-
-    var_line = next((ln for ln in lines if ln.lstrip().upper().startswith("VARIABLES")), "")
-    var_names = re.findall(r'"([^\"]+)"', var_line)
+    # Collect all lines from the VARIABLES block until the next ZONE line.
+    var_start = next(
+        (i for i, ln in enumerate(lines) if ln.lstrip().upper().startswith("VARIABLES")),
+        None,
+    )
+    var_lines: list[str] = []
+    if var_start is not None:
+        for ln in lines[var_start:]:
+            if ln.lstrip().upper().startswith("ZONE"):
+                break
+            var_lines.append(ln.strip())
+    var_text = " ".join(var_lines)
+    var_names = re.findall(r'"([^\"]+)"', var_text)
     var_map = {_normalize(name): i for i, name in enumerate(var_names)}
     n_vars = len(var_names)
 
