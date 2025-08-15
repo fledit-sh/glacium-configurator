@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 import argparse
 from types import SimpleNamespace
+from typing import Optional
 import tempfile
 import zipfile
 
@@ -93,6 +94,21 @@ def walk_zone_nodes(z: SimpleNamespace) -> np.ndarray:
 
     return np.array(order, dtype=int)
 
+
+def filter_nodes_by_z(
+    nodes: np.ndarray, elem: Optional[np.ndarray], z_idx: int
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    mask = nodes[:, z_idx] <= 0
+    filtered_nodes = nodes[mask]
+    if elem is None:
+        return filtered_nodes, None
+    idx_map = {old: new for new, old in enumerate(np.where(mask)[0])}
+    new_elems: list[list[int]] = []
+    for a, b in elem:
+        if mask[a] and mask[b]:
+            new_elems.append([idx_map[a], idx_map[b]])
+    filtered_elem = np.array(new_elems, dtype=int) if new_elems else None
+    return filtered_nodes, filtered_elem
 
 
 def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
@@ -278,6 +294,7 @@ def main():
         u_idx = idx("u", "velocityx", "xvelocity", "v1", "v1-velocity")
         v_idx = idx("v", "velocityy", "yvelocity", "v2", "v2-velocity")
         w_idx = idx("w", "velocityz", "zvelocity", "v3", "v3-velocity")
+        z_idx = idx("z")
 
         if inlet_zones:
             inlet_nodes = np.concatenate([z.nodes for z in inlet_zones])
@@ -326,6 +343,8 @@ def main():
         if prev_end is not None and all_nodes.size:
             elem_list.append(np.array([[prev_end, 0]], dtype=int))
         all_elem = np.concatenate(elem_list) if elem_list else None
+
+        all_nodes, all_elem = filter_nodes_by_z(all_nodes, all_elem, z_idx)
 
         merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
         ord_idx = walk_zone_nodes(merged_zone)
