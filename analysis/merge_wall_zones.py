@@ -7,6 +7,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+# Keywords used to automatically identify wall zones.  The search is case
+# insensitive and runs against the zone title as well as the raw zone header.
+# Additional markers can be added to this list as needed.
+WALL_KEYWORDS = ("wall", "surface", "solid")
+
+
 def _normalize(name: str) -> str:
     """Normalize a Tecplot variable name for lookup."""
     return re.sub(r"\s+", "", name).lower()
@@ -150,8 +156,21 @@ def read_solution(path: Path):
     zone_starts = [i for i, line in enumerate(lines) if line.lstrip().startswith("ZONE")]
     zone_starts.append(len(lines))
 
+    # Discover wall zones dynamically by inspecting each zone header/title for
+    # a set of keywords (see WALL_KEYWORDS above).  The resulting list of
+    # indices is used throughout the parsing below.
+    wall_zone_indices: list[int] = []
+    for idx, start in enumerate(zone_starts[:-1], start=1):
+        header = lines[start]
+        title_match = re.search(r'T="([^"]+)', header)
+        title = title_match.group(1) if title_match else ""
+        meta = f"{header} {title}".lower()
+        if any(kw in meta for kw in WALL_KEYWORDS):
+            wall_zone_indices.append(idx)
+
+    wall_zone_set = set(wall_zone_indices)
+
     wall_zones: list[SimpleNamespace] = []
-    known_wall_indices = {2, 3}
     total_nodes = 0
     wall_nodes = 0
 
@@ -162,19 +181,19 @@ def read_solution(path: Path):
             continue
         N = int(mN.group(1))
         total_nodes += N
+        if idx not in wall_zone_set:
+            continue
         mE = re.search(r"E=\s*(\d+)", header)
         E = int(mE.group(1)) if mE else 0
         mtype = re.search(r"ZONETYPE=([^,\s]+)", header)
         zonetype = mtype.group(1).upper() if mtype else ""
-        title_match = re.search(r'T="([^"]+)', header)
-        title = title_match.group(1) if title_match else ""
-        is_wall = "wall" in title.lower() or idx in known_wall_indices
-        if not is_wall:
-            continue
 
         nnpe = expected_nodes_per_element(zonetype)
         data_lines = lines[start + 1 : end]
         text = " ".join(line.strip() for line in data_lines)
+        # Some Tecplot exports omit the "E" in scientific notation (e.g.
+        # "1.23+05").  Insert the missing "e" so NumPy can parse the values.
+        text = re.sub(r"(?<=\d)([+-]\d{2,})", r"e\1", text)
         values = np.fromstring(text, sep=" ")
         node_vals = values[: N * n_vars].reshape(N, n_vars)
         if nnpe > 0 and E > 0 and values.size >= N * n_vars + E * nnpe:
@@ -197,7 +216,7 @@ def read_solution(path: Path):
         wall_nodes += nodes.shape[0]
         wall_zones.append(SimpleNamespace(nodes=nodes, elem=elem_arr))
 
-    return wall_zones, total_nodes, wall_nodes, var_map
+    return wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices
 
 
 def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
@@ -217,11 +236,12 @@ def main():
     parser.add_argument("--out", type=Path, help="Optional Tecplot output file")
     args = parser.parse_args()
 
-    wall_zones, total_nodes, wall_nodes, var_map = read_solution(args.solution)
+    wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices = read_solution(args.solution)
     print(
         f"Total nodes: {total_nodes}, wall nodes: {wall_nodes}, "
         f"excluded: {total_nodes - wall_nodes}"
     )
+    print(f"Detected wall zone indices: {wall_zone_indices}")
 
     if not wall_zones:
         return
