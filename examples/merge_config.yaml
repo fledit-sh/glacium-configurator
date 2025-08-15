@@ -1,4 +1,0 @@
-input: examples/sample_mesh.vtp
-output: examples/merged_mesh.vtp
-wall_zones: [1, 2]
-plot: examples/zone_counts.png

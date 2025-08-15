@@ -1,7 +1,0 @@
-package: ""
-PWS_AIRFOIL_FILE: ../profiles/airfoil.dat
-PWS_PROFILE1: ../profiles/densened.dat
-PWS_PROFILE2: ../profiles/thickened.dat
-PWS_POLAR_FILE: ../results/pol_output.pol
-PWS_SUCTION_FILE: ../results/psi_output.pol
-PWS_INI_NUM_PANELS: 400
