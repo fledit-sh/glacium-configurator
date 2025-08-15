@@ -68,6 +68,29 @@ def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
             f.write(f"{xi} {yi} {ci}\n")
 
 
+def nearest_neighbor_order(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Return an index order tracing the boundary using nearest-neighbor traversal."""
+    points = np.column_stack((x, y))
+    n = len(points)
+    if n == 0:
+        return np.array([], dtype=int)
+
+    order = [0]
+    remaining = set(range(1, n))
+    current = 0
+
+    while remaining:
+        last = points[current]
+        rem_list = np.array(list(remaining))
+        distances = np.linalg.norm(points[rem_list] - last, axis=1)
+        next_idx = rem_list[np.argmin(distances)]
+        order.append(next_idx)
+        remaining.remove(next_idx)
+        current = next_idx
+
+    return np.array(order)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Extract wall nodes and compute surface pressure coefficient.'
@@ -98,9 +121,14 @@ def main():
     ax1.set_title('Airfoil geometry (z<=0)')
     fig1.savefig('airfoil_geometry.png')
 
-    order = np.argsort(x_wall)
+    order = nearest_neighbor_order(x_wall, y_wall)
+    x_ord, y_ord, cp_ord = x_wall[order], y_wall[order], cp_wall[order]
+    x_closed = np.append(x_ord, x_ord[0])
+    y_closed = np.append(y_ord, y_ord[0])
+    cp_closed = np.append(cp_ord, cp_ord[0])
+
     fig2, ax2 = plt.subplots()
-    ax2.plot(x_wall[order], cp_wall[order])
+    ax2.plot(x_closed, cp_closed)
     ax2.set_xlabel('x')
     ax2.set_ylabel('Cp')
     ax2.invert_yaxis()
@@ -108,7 +136,7 @@ def main():
     fig2.savefig('surface_cp.png')
 
     if args.out:
-        write_tecplot(args.out, x_wall[order], y_wall[order], cp_wall[order])
+        write_tecplot(args.out, x_closed, y_closed, cp_closed)
 
     # Show figures if interactive backend is available
     try:
