@@ -262,6 +262,110 @@ def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
             f.write(f"{xi} {yi} {ci}\n")
 
 
+def merge_zones(
+    wall_zones: list[SimpleNamespace],
+    inlet_zones: list[SimpleNamespace],
+    var_map: dict[str, int],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Merge ordered wall zones and compute the closed Cp curve.
+
+    Parameters
+    ----------
+    wall_zones : list of SimpleNamespace
+        Zones containing ``nodes`` and optional ``elem`` arrays.
+    inlet_zones : list of SimpleNamespace
+        Zones used to estimate free–stream conditions. May be empty.
+    var_map : dict
+        Mapping from normalized variable names to column indices.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        The closed ``x``, ``y`` and ``Cp`` arrays describing the airfoil
+        surface.
+    """
+
+    idx = lambda *names: _get_var_index(var_map, list(names))
+    x_idx = idx("x")
+    y_idx = idx("y")
+    p_idx = idx("pressure", "p")
+    rho_idx = idx("density", "rho")
+    u_idx = idx("u", "velocityx", "xvelocity", "v1", "v1-velocity")
+    v_idx = idx("v", "velocityy", "yvelocity", "v2", "v2-velocity")
+    w_idx = idx("w", "velocityz", "zvelocity", "v3", "v3-velocity")
+    z_idx = idx("z")
+
+    if inlet_zones:
+        inlet_nodes = np.concatenate([z.nodes for z in inlet_zones])
+        rho_inf = float(np.median(inlet_nodes[:, rho_idx]))
+        p_inf = float(np.median(inlet_nodes[:, p_idx]))
+        vel_mag = np.sqrt(
+            inlet_nodes[:, u_idx] ** 2
+            + inlet_nodes[:, v_idx] ** 2
+            + inlet_nodes[:, w_idx] ** 2
+        )
+        u_inf = float(np.median(vel_mag))
+    else:
+        first = wall_zones[0].nodes[0]
+        rho_inf = first[rho_idx]
+        p_inf = first[p_idx]
+        u_inf = float(
+            np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2)
+        )
+
+    nodes_list: list[np.ndarray] = []
+    elem_list: list[np.ndarray] = []
+    offset = 0
+    prev_end = None
+    for z in wall_zones:
+        local_order, n_endpoints = walk_zone_nodes(z)
+        if n_endpoints != 2:
+            raise ValueError(f"Zone has {n_endpoints} endpoints; expected 2")
+        ordered_nodes = z.nodes[local_order]
+        if ordered_nodes[-1, x_idx] > ordered_nodes[0, x_idx]:
+            ordered_nodes = ordered_nodes[::-1]
+        n = ordered_nodes.shape[0]
+        start_global = offset
+        end_global = offset + n - 1
+        z.start = start_global
+        z.end = end_global
+        nodes_list.append(ordered_nodes)
+        elem_list.append(
+            np.column_stack(
+                [
+                    np.arange(start_global, start_global + n - 1),
+                    np.arange(start_global + 1, start_global + n),
+                ]
+            )
+        )
+        if prev_end is not None:
+            elem_list.append(np.array([[prev_end, start_global]], dtype=int))
+        offset += n
+        prev_end = end_global
+
+    all_nodes = np.concatenate(nodes_list)
+    if prev_end is not None and all_nodes.size:
+        elem_list.append(np.array([[prev_end, wall_zones[0].start]], dtype=int))
+    all_elem = np.concatenate(elem_list) if elem_list else None
+
+    all_nodes, all_elem = filter_nodes_by_z(all_nodes, all_elem, z_idx)
+
+    merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
+    ord_idx, _ = walk_zone_nodes(merged_zone)
+    nodes = all_nodes[ord_idx]
+
+    x = nodes[:, x_idx]
+    y = nodes[:, y_idx]
+    p = nodes[:, p_idx]
+    cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
+
+    x_closed = np.append(x, x[0])
+    y_closed = np.append(y, y[0])
+    cp_closed = np.append(cp, cp[0])
+
+    return x_closed, y_closed, cp_closed
+
+
 def plot_airfoil_geometry(x: np.ndarray, y: np.ndarray, path: Path) -> None:
     fig, ax = plt.subplots()
     ax.scatter(x, y, s=5)
@@ -327,78 +431,7 @@ def main():
         if not wall_zones:
             return
 
-        idx = lambda *names: _get_var_index(var_map, list(names))
-        x_idx = idx("x")
-        y_idx = idx("y")
-        p_idx = idx("pressure", "p")
-        rho_idx = idx("density", "rho")
-        u_idx = idx("u", "velocityx", "xvelocity", "v1", "v1-velocity")
-        v_idx = idx("v", "velocityy", "yvelocity", "v2", "v2-velocity")
-        w_idx = idx("w", "velocityz", "zvelocity", "v3", "v3-velocity")
-        z_idx = idx("z")
-
-        if inlet_zones:
-            inlet_nodes = np.concatenate([z.nodes for z in inlet_zones])
-            rho_inf = float(np.median(inlet_nodes[:, rho_idx]))
-            p_inf = float(np.median(inlet_nodes[:, p_idx]))
-            vel_mag = np.sqrt(
-                inlet_nodes[:, u_idx] ** 2
-                + inlet_nodes[:, v_idx] ** 2
-                + inlet_nodes[:, w_idx] ** 2
-            )
-            u_inf = float(np.median(vel_mag))
-        else:
-            first = wall_zones[0].nodes[0]
-            rho_inf = first[rho_idx]
-            p_inf = first[p_idx]
-            u_inf = float(
-                np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2)
-            )
-
-        nodes_list: list[np.ndarray] = []
-        elem_list: list[np.ndarray] = []
-        offset = 0
-        prev_end = None
-        for z in wall_zones:
-            local_order, _ = walk_zone_nodes(z)
-            ordered_nodes = z.nodes[local_order]
-            n = ordered_nodes.shape[0]
-            start_global = offset
-            end_global = offset + n - 1
-            z.first = start_global
-            z.last = end_global
-            nodes_list.append(ordered_nodes)
-            elem_list.append(
-                np.column_stack([
-                    np.arange(start_global, start_global + n - 1),
-                    np.arange(start_global + 1, start_global + n),
-                ])
-            )
-            if prev_end is not None:
-                elem_list.append(np.array([[prev_end, start_global]], dtype=int))
-            offset += n
-            prev_end = end_global
-
-        all_nodes = np.concatenate(nodes_list)
-        # Connect final zone back to the first to close the loop
-        if prev_end is not None and all_nodes.size:
-            elem_list.append(np.array([[prev_end, 0]], dtype=int))
-        all_elem = np.concatenate(elem_list) if elem_list else None
-
-        all_nodes, all_elem = filter_nodes_by_z(all_nodes, all_elem, z_idx)
-
-        merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
-        ord_idx, _ = walk_zone_nodes(merged_zone)
-        nodes = all_nodes[ord_idx]
-
-        x = nodes[:, x_idx]
-        y = nodes[:, y_idx]
-        p = nodes[:, p_idx]
-        cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
-
-        x_closed = np.append(x, x[0])
-        y_closed = np.append(y, y[0])
-        cp_closed = np.append(cp, cp[0])
+        x_closed, y_closed, cp_closed = merge_zones(wall_zones, inlet_zones, var_map)
 
         geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
         cp_path = out_dir / f"{prefix}_surface_cp.png"
