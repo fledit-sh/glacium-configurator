@@ -18,7 +18,7 @@ def _node(x):
 
 def test_merge_zones_no_endpoints_message():
     nodes = np.array([_node(0.0), _node(1.0)])
-    zone = SimpleNamespace(nodes=nodes, elem=None)
+    zone = SimpleNamespace(nodes=nodes, elem=None, title="TestZone")
 
     var_map = {
         "x": 0,
@@ -31,6 +31,8 @@ def test_merge_zones_no_endpoints_message():
         "w": 7,
     }
 
-    with pytest.raises(ValueError, match="no endpoints"):
+    with pytest.raises(
+        ValueError, match=r"Zone 1 \(TestZone\) has no endpoints"
+    ):
         merge_zones([zone], [], var_map)
 
