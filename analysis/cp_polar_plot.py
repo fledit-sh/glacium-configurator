@@ -2,9 +2,12 @@
 # Cp-on-normals normalized plot from a Tecplot file
 # Usage: python make_cp_normals.py /path/to/soln.dat [scale_fraction=0.07]
 import sys, re
-import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from node_order import boundary_loop_order, nearest_neighbor_order, order_points_from_lineseg
 
 class TecplotZone:
     def __init__(self, title, attrs):
@@ -92,51 +95,6 @@ def find_var_index(varnames, candidates):
         for i, v in enumerate(lower):
             if v == cand.lower() or cand.lower() in v: return i
     return None
-
-def order_points_from_lineseg(npts, elements):
-    adj = {i: [] for i in range(npts)}
-    for a,b in elements: a=int(a); b=int(b); adj[a].append(b); adj[b].append(a)
-    endpoints=[i for i,n in adj.items() if len(n)==1]; start=endpoints[0] if endpoints else 0
-    order=[start]; vis={start}; cur=start
-    while True:
-        nxt=[n for n in adj[cur] if n not in vis]
-        if not nxt: break
-        cur=nxt[0]; order.append(cur); vis.add(cur)
-    if len(order)<npts: order.extend([i for i in range(npts) if i not in vis])
-    return order
-
-def boundary_loop_order(npts, elements):
-    edge_count={}
-    for elem in elements:
-        for a,b in zip(elem, np.roll(elem,-1)):
-            a=int(a); b=int(b); e=(min(a,b),max(a,b)); edge_count[e]=edge_count.get(e,0)+1
-    boundary=[e for e,c in edge_count.items() if c==1]
-    if not boundary: return []
-    adj={i:[] for i in range(npts)}; bnodes=set()
-    for a,b in boundary: adj[a].append(b); adj[b].append(a); bnodes.add(a); bnodes.add(b)
-    endpoints=[i for i in bnodes if len(adj[i])==1]; start=endpoints[0] if endpoints else min(bnodes)
-    order=[start]; vis={start}; cur=start; prev=None
-    while True:
-        nbrs=adj[cur]; nxts=[n for n in nbrs if n!=prev]
-        if not nxts: break
-        nxt=nxts[0]
-        if nxt in vis:
-            if nxt==order[0] and len(vis)==len(bnodes): break
-            alt=[n for n in nbrs if n not in (prev,nxt)]
-            if alt: nxt=alt[0]
-            else: break
-        order.append(nxt); vis.add(nxt); prev, cur = cur, nxt
-        if len(vis)>=len(bnodes) and order[0] in adj[cur]: break
-    return [i for i in order if i in bnodes]
-
-def nearest_neighbor_order(xy):
-    n=xy.shape[0]
-    if n==0: return []
-    unused=set(range(n)); start=int(np.argmin(xy[:,0])); order=[start]; unused.remove(start); last=start
-    while unused:
-        idxs=np.array(sorted(list(unused))); d=np.linalg.norm(xy[idxs]-xy[last],axis=1)
-        j=idxs[int(np.argmin(d))]; order.append(int(j)); unused.remove(int(j)); last=int(j)
-    return order
 
 def order_zone(z, x_idx, y_idx):
     X = z.nodes[:, x_idx]; Y = z.nodes[:, y_idx]
