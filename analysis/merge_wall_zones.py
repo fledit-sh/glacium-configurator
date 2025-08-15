@@ -218,9 +218,9 @@ def main():
         y_idx = idx("y")
         p_idx = idx("pressure", "p")
         rho_idx = idx("density", "rho")
-        u_idx = idx("u", "velocityx", "xvelocity")
-        v_idx = idx("v", "velocityy", "yvelocity")
-        w_idx = idx("w", "velocityz", "zvelocity")
+        u_idx = idx("u", "velocityx", "xvelocity", "v1", "v1-velocity")
+        v_idx = idx("v", "velocityy", "yvelocity", "v2", "v2-velocity")
+        w_idx = idx("w", "velocityz", "zvelocity", "v3", "v3-velocity")
 
         first = wall_zones[0].nodes[0]
         rho_inf = first[rho_idx]
