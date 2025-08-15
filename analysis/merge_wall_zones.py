@@ -7,6 +7,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+def _normalize(name: str) -> str:
+    """Normalize a Tecplot variable name for lookup."""
+    return re.sub(r"\s+", "", name).lower()
+
+
+def _get_var_index(var_map: dict[str, int], candidates: list[str]) -> int:
+    """Return the index of the first matching variable name."""
+    for cand in candidates:
+        idx = var_map.get(_normalize(cand))
+        if idx is not None:
+            return idx
+    raise KeyError(f"Variable not found among candidates: {candidates}")
+
+
 def expected_nodes_per_element(zonetype: str) -> int:
     return {
         "FELINESEG": 2,
@@ -126,11 +140,17 @@ def read_solution(path: Path):
     with open(path, "r") as f:
         lines = f.readlines()
 
+    var_line = next((ln for ln in lines if ln.lstrip().upper().startswith("VARIABLES")), "")
+    var_names = re.findall(r'"([^\"]+)"', var_line)
+    var_map = {_normalize(name): i for i, name in enumerate(var_names)}
+    n_vars = len(var_names)
+
+    z_idx = _get_var_index(var_map, ["z"])
+
     zone_starts = [i for i, line in enumerate(lines) if line.lstrip().startswith("ZONE")]
     zone_starts.append(len(lines))
 
     wall_zones: list[SimpleNamespace] = []
-    n_vars = 21
     known_wall_indices = {2, 3}
     total_nodes = 0
     wall_nodes = 0
@@ -162,7 +182,7 @@ def read_solution(path: Path):
         else:
             conn_vals = None
 
-        mask = node_vals[:, 2] <= 0
+        mask = node_vals[:, z_idx] <= 0
         nodes = node_vals[mask]
         if conn_vals is not None:
             idx_map = {old: new for new, old in enumerate(np.where(mask)[0])}
@@ -177,7 +197,7 @@ def read_solution(path: Path):
         wall_nodes += nodes.shape[0]
         wall_zones.append(SimpleNamespace(nodes=nodes, elem=elem_arr))
 
-    return wall_zones, total_nodes, wall_nodes
+    return wall_zones, total_nodes, wall_nodes, var_map
 
 
 def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
@@ -197,7 +217,7 @@ def main():
     parser.add_argument("--out", type=Path, help="Optional Tecplot output file")
     args = parser.parse_args()
 
-    wall_zones, total_nodes, wall_nodes = read_solution(args.solution)
+    wall_zones, total_nodes, wall_nodes, var_map = read_solution(args.solution)
     print(
         f"Total nodes: {total_nodes}, wall nodes: {wall_nodes}, "
         f"excluded: {total_nodes - wall_nodes}"
@@ -206,21 +226,30 @@ def main():
     if not wall_zones:
         return
 
+    idx = lambda *names: _get_var_index(var_map, list(names))
+    x_idx = idx("x")
+    y_idx = idx("y")
+    p_idx = idx("pressure", "p")
+    rho_idx = idx("density", "rho")
+    u_idx = idx("u", "velocityx", "xvelocity")
+    v_idx = idx("v", "velocityy", "yvelocity")
+    w_idx = idx("w", "velocityz", "zvelocity")
+
     first = wall_zones[0].nodes[0]
-    rho_inf = first[3]
-    p_inf = first[4]
-    u_inf = float(np.sqrt(first[5] ** 2 + first[6] ** 2 + first[7] ** 2))
+    rho_inf = first[rho_idx]
+    p_inf = first[p_idx]
+    u_inf = float(np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2))
 
     xs: list[np.ndarray] = []
     ys: list[np.ndarray] = []
     cps: list[np.ndarray] = []
 
     for z in wall_zones:
-        ord_idx = order_zone(z, 0, 1)
+        ord_idx = order_zone(z, x_idx, y_idx)
         nodes = z.nodes[ord_idx]
-        x = nodes[:, 0]
-        y = nodes[:, 1]
-        p = nodes[:, 4]
+        x = nodes[:, x_idx]
+        y = nodes[:, y_idx]
+        p = nodes[:, p_idx]
         cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
         xs.append(x)
         ys.append(y)
