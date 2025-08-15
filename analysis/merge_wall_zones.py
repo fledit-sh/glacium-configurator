@@ -174,7 +174,7 @@ def read_solution(path: Path):
 
         nnpe = expected_nodes_per_element(zonetype)
         data_lines = lines[start + 1 : end]
-        text = "".join(line.strip() for line in data_lines)
+        text = " ".join(line.strip() for line in data_lines)
         values = np.fromstring(text, sep=" ")
         node_vals = values[: N * n_vars].reshape(N, n_vars)
         if nnpe > 0 and E > 0 and values.size >= N * n_vars + E * nnpe:
