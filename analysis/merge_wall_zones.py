@@ -100,7 +100,17 @@ def main():
     args = parser.parse_args()
 
     data = read_solution(args.solution)
-    x, y, z = data[:, 0], data[:, 1], data[:, 2]
+    total_nodes = len(data)
+
+    # Apply wall mask immediately after reading the solution
+    mask = data[:, 2] <= 0  # z coordinate
+    data = data[mask]
+    print(
+        f'Total nodes: {total_nodes}, wall nodes: {len(data)}, '
+        f'excluded: {total_nodes - len(data)}'
+    )
+
+    x, y = data[:, 0], data[:, 1]
     rho, p = data[:, 3], data[:, 4]
     v1, v2, v3 = data[:, 5], data[:, 6], data[:, 7]
 
@@ -109,20 +119,16 @@ def main():
     u_inf = np.sqrt(v1[0]**2 + v2[0]**2 + v3[0]**2)
     cp = (p - p_inf) / (0.5 * rho_inf * u_inf**2)
 
-    mask = z <= 0
-    x_wall, y_wall, cp_wall = x[mask], y[mask], cp[mask]
-    print(f'Total nodes: {len(x)}, wall nodes: {len(x_wall)}, excluded: {len(x) - len(x_wall)}')
-
     fig1, ax1 = plt.subplots()
-    ax1.scatter(x_wall, y_wall, s=5)
+    ax1.scatter(x, y, s=5)
     ax1.set_aspect('equal', adjustable='box')
     ax1.set_xlabel('x')
     ax1.set_ylabel('y')
     ax1.set_title('Airfoil geometry (z<=0)')
     fig1.savefig('airfoil_geometry.png')
 
-    order = nearest_neighbor_order(x_wall, y_wall)
-    x_ord, y_ord, cp_ord = x_wall[order], y_wall[order], cp_wall[order]
+    order = nearest_neighbor_order(x, y)
+    x_ord, y_ord, cp_ord = x[order], y[order], cp[order]
     x_closed = np.append(x_ord, x_ord[0])
     y_closed = np.append(y_ord, y_ord[0])
     cp_closed = np.append(cp_ord, cp_ord[0])
