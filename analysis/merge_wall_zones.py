@@ -94,6 +94,7 @@ def walk_zone_nodes(z: SimpleNamespace) -> np.ndarray:
     return np.array(order, dtype=int)
 
 
+
 def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
     with open(path, "r") as f:
         lines = f.readlines()
@@ -108,21 +109,26 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
     zone_starts = [i for i, line in enumerate(lines) if line.lstrip().startswith("ZONE")]
     zone_starts.append(len(lines))
 
-    # Discover wall zones dynamically by inspecting each zone header/title for
-    # a set of keywords (see WALL_KEYWORDS above).  The resulting list of
-    # indices is used throughout the parsing below.
+    # Discover wall and inlet zones dynamically by inspecting each zone header
+    # and title. The search is case insensitive and runs against the zone title
+    # as well as the raw zone header.
     wall_zone_indices: list[int] = []
+    inlet_zone_indices: list[int] = []
     for idx, start in enumerate(zone_starts[:-1], start=1):
         header = lines[start]
-        title_match = re.search(r'T="([^"]+)', header)
+        title_match = re.search(r'T="([^\"]+)', header)
         title = title_match.group(1) if title_match else ""
         meta = f"{header} {title}".lower()
         if any(kw in meta for kw in WALL_KEYWORDS):
             wall_zone_indices.append(idx)
+        if "inlet" in meta:
+            inlet_zone_indices.append(idx)
 
     wall_zone_set = set(wall_zone_indices)
+    inlet_zone_set = set(inlet_zone_indices)
 
     wall_zones: list[SimpleNamespace] = []
+    inlet_zones: list[SimpleNamespace] = []
     total_nodes = 0
     wall_nodes = 0
 
@@ -133,8 +139,12 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
             continue
         N = int(mN.group(1))
         total_nodes += N
-        if idx not in wall_zone_set:
+
+        is_wall = idx in wall_zone_set
+        is_inlet = idx in inlet_zone_set
+        if not (is_wall or is_inlet):
             continue
+
         mE = re.search(r"E=\s*(\d+)", header)
         E = int(mE.group(1)) if mE else 0
         mtype = re.search(r"ZONETYPE=([^,\s]+)", header)
@@ -153,25 +163,37 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
         else:
             conn_vals = None
 
-        mask = node_vals[:, z_idx] <= z_threshold + tol
-        nodes = node_vals[mask]
-        if conn_vals is not None:
-            idx_map = {old: new for new, old in enumerate(np.where(mask)[0])}
-            new_elems = []
-            for elem in conn_vals:
-                elem = [int(n) for n in elem]
-                if all(mask[n] for n in elem):
-                    new_elems.append([idx_map[n] for n in elem])
-            # Ensure downstream code receives either a 2-D array or None.
-            elem_arr = (
-                np.array(new_elems, dtype=int) if new_elems else None
-            )
-        else:
-            elem_arr = None
-        wall_nodes += nodes.shape[0]
-        wall_zones.append(SimpleNamespace(nodes=nodes, elem=elem_arr))
+        if is_wall:
+            mask = node_vals[:, z_idx] <= z_threshold + tol
+            nodes = node_vals[mask]
+            if conn_vals is not None:
+                idx_map = {old: new for new, old in enumerate(np.where(mask)[0])}
+                new_elems = []
+                for elem in conn_vals:
+                    elem = [int(n) for n in elem]
+                    if all(mask[n] for n in elem):
+                        new_elems.append([idx_map[n] for n in elem])
+                # Ensure downstream code receives either a 2-D array or None.
+                elem_arr = (
+                    np.array(new_elems, dtype=int) if new_elems else None
+                )
+            else:
+                elem_arr = None
+            wall_nodes += nodes.shape[0]
+            wall_zones.append(SimpleNamespace(nodes=nodes, elem=elem_arr))
 
-    return wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices
+        if is_inlet:
+            inlet_zones.append(SimpleNamespace(nodes=node_vals))
+
+    return (
+        wall_zones,
+        inlet_zones,
+        total_nodes,
+        wall_nodes,
+        var_map,
+        wall_zone_indices,
+        inlet_zone_indices,
+    )
 
 
 def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
@@ -229,14 +251,21 @@ def main():
     out_dir = args.out.parent if args.out else args.solution.parent
 
     def process(sol_path: Path) -> None:
-        wall_zones, total_nodes, wall_nodes, var_map, wall_zone_indices = read_solution(
-            sol_path, args.z_threshold, args.tolerance
-        )
+        (
+            wall_zones,
+            inlet_zones,
+            total_nodes,
+            wall_nodes,
+            var_map,
+            wall_zone_indices,
+            inlet_zone_indices,
+        ) = read_solution(sol_path, args.z_threshold, args.tolerance)
         print(
             f"Total nodes: {total_nodes}, wall nodes: {wall_nodes}, "
             f"excluded: {total_nodes - wall_nodes}"
         )
         print(f"Detected wall zone indices: {wall_zone_indices}")
+        print(f"Detected inlet zone indices: {inlet_zone_indices}")
 
         if not wall_zones:
             return
@@ -250,10 +279,23 @@ def main():
         v_idx = idx("v", "velocityy", "yvelocity", "v2", "v2-velocity")
         w_idx = idx("w", "velocityz", "zvelocity", "v3", "v3-velocity")
 
-        first = wall_zones[0].nodes[0]
-        rho_inf = first[rho_idx]
-        p_inf = first[p_idx]
-        u_inf = float(np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2))
+        if inlet_zones:
+            inlet_nodes = np.concatenate([z.nodes for z in inlet_zones])
+            rho_inf = float(np.median(inlet_nodes[:, rho_idx]))
+            p_inf = float(np.median(inlet_nodes[:, p_idx]))
+            vel_mag = np.sqrt(
+                inlet_nodes[:, u_idx] ** 2
+                + inlet_nodes[:, v_idx] ** 2
+                + inlet_nodes[:, w_idx] ** 2
+            )
+            u_inf = float(np.median(vel_mag))
+        else:
+            first = wall_zones[0].nodes[0]
+            rho_inf = first[rho_idx]
+            p_inf = first[p_idx]
+            u_inf = float(
+                np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2)
+            )
 
         nodes_list: list[np.ndarray] = []
         elem_list: list[np.ndarray] = []
