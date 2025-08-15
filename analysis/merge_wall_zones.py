@@ -57,7 +57,12 @@ def expected_nodes_per_element(zonetype: str) -> int:
 def order_zone(z: SimpleNamespace, x_idx: int, y_idx: int) -> np.ndarray:
     X = z.nodes[:, x_idx]
     Y = z.nodes[:, y_idx]
-    if z.elem is not None and z.elem.ndim == 2 and z.elem.size > 0:
+    # Some zones may declare elements but provide an empty or malformed
+    # connectivity array.  Guard against this by verifying ``elem`` is a
+    # non-empty 2-D array before accessing ``shape``.  If not, fall back to a
+    # nearest-neighbor ordering so zones with zero connectivity are still
+    # processed gracefully.
+    if z.elem is not None and z.elem.ndim == 2 and z.elem.size:
         if z.elem.shape[1] == 2:
             ord_idx = order_points_from_lineseg(len(X), z.elem)
         else:
