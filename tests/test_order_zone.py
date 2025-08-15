@@ -16,3 +16,19 @@ def test_order_zone_no_elements_uses_nearest_neighbor():
     result = order_zone(zone, 0, 1)
     expected = np.array(nearest_neighbor_order(nodes), dtype=int)
     assert np.array_equal(result, expected)
+
+
+def test_order_zone_empty_connectivity_falls_back_to_nearest_neighbor():
+    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]])
+    zone = SimpleNamespace(nodes=nodes, elem=np.empty((0, 2), dtype=int))
+    result = order_zone(zone, 0, 1)
+    expected = np.array(nearest_neighbor_order(nodes), dtype=int)
+    assert np.array_equal(result, expected)
+
+
+def test_order_zone_wrong_dimensionality_falls_back_to_nearest_neighbor():
+    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]])
+    zone = SimpleNamespace(nodes=nodes, elem=np.array([0, 1, 2]))
+    result = order_zone(zone, 0, 1)
+    expected = np.array(nearest_neighbor_order(nodes), dtype=int)
+    assert np.array_equal(result, expected)
