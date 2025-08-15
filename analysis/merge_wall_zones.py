@@ -160,6 +160,87 @@ def filter_nodes_by_z(
     return filtered_nodes, filtered_elem
 
 
+def slice_surface_zone(
+    nodes: np.ndarray, conn_vals: np.ndarray, z_threshold: float, z_idx: int
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    """Slice surface elements by a plane ``z=z_threshold``.
+
+    Parameters
+    ----------
+    nodes : np.ndarray
+        Array of node values for the entire zone.
+    conn_vals : np.ndarray
+        Element connectivity describing faces (triangles or quadrilaterals).
+    z_threshold : float
+        ``z`` value of the slicing plane.
+    z_idx : int
+        Column index of the ``z`` coordinate in ``nodes``.
+
+    Returns
+    -------
+    tuple of np.ndarray and Optional[np.ndarray]
+        The sliced node array containing newly created intersection points and
+        an array of boundary edges referencing those nodes. If no intersections
+        are found, the edge array is ``None``.
+    """
+
+    if conn_vals is None or conn_vals.size == 0:
+        return np.empty((0, nodes.shape[1])), None
+
+    # Maps for de-duplicating nodes
+    node_map: dict[tuple[str, int], int] = {}
+    new_nodes: list[np.ndarray] = []
+    edges: list[tuple[int, int]] = []
+
+    def _add_existing(idx: int) -> int:
+        key = ("n", idx)
+        if key not in node_map:
+            node_map[key] = len(new_nodes)
+            new_nodes.append(nodes[idx])
+        return node_map[key]
+
+    def _add_intersection(a: int, b: int) -> int:
+        key = ("i",) + tuple(sorted((a, b)))
+        if key not in node_map:
+            za, zb = nodes[a, z_idx], nodes[b, z_idx]
+            t = (z_threshold - za) / (zb - za)
+            point = nodes[a] + t * (nodes[b] - nodes[a])
+            node_map[key] = len(new_nodes)
+            new_nodes.append(point)
+        return node_map[key]
+
+    for elem in conn_vals:
+        verts = [int(n) for n in elem]
+        ints: list[int] = []
+        n = len(verts)
+        for i in range(n):
+            a = verts[i]
+            b = verts[(i + 1) % n]
+            za = nodes[a, z_idx] - z_threshold
+            zb = nodes[b, z_idx] - z_threshold
+            if za == 0 and zb == 0:
+                ia = _add_existing(a)
+                ib = _add_existing(b)
+                edges.append((ia, ib))
+            elif za == 0:
+                ia = _add_existing(a)
+                ints.append(ia)
+            elif zb == 0:
+                ib = _add_existing(b)
+                ints.append(ib)
+            elif za * zb < 0:
+                ints.append(_add_intersection(a, b))
+        if len(ints) == 2:
+            edges.append((ints[0], ints[1]))
+        elif len(ints) > 2:
+            ints = list(dict.fromkeys(ints))
+            for i in range(len(ints) - 1):
+                edges.append((ints[i], ints[i + 1]))
+
+    edge_arr = np.array(edges, dtype=int) if edges else None
+    return np.array(new_nodes), edge_arr
+
+
 def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
     """Parse a Tecplot solution file and extract wall and inlet zones.
 
@@ -263,6 +344,10 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
                             elem_arr = np.array(boundary_edges, dtype=int)
                     else:
                         elem_arr = np.array(new_elems, dtype=int)
+                if elem_arr is None and zonetype in SURFACE_ZONETYPES:
+                    nodes, elem_arr = slice_surface_zone(
+                        node_vals, conn_vals, z_threshold + tol, z_idx
+                    )
             wall_nodes += nodes.shape[0]
             wall_zones.append(SimpleNamespace(nodes=nodes, elem=elem_arr))
 
