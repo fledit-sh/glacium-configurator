@@ -11,7 +11,7 @@ from merge_wall_zones import merge_zones, read_solution
 
 def _load():
     data_path = Path(__file__).with_name("sample_cp_loop.dat")
-    wall_zones, inlet_zones, _, _, var_map, _, _ = read_solution(data_path)
+    wall_zones, inlet_zones, _, _, var_map, _, _, _ = read_solution(data_path)
     return wall_zones, inlet_zones, var_map
 
 
