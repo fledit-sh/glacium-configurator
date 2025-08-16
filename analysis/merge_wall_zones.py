@@ -775,8 +775,14 @@ def merge_zones(
 
 
 def plot_airfoil_geometry(x: np.ndarray, y: np.ndarray, path: Path) -> None:
+    if x.size and y.size and (
+        not np.isclose(x[0], x[-1]) or not np.isclose(y[0], y[-1])
+    ):
+        x = np.append(x, x[0])
+        y = np.append(y, y[0])
+
     fig, ax = plt.subplots()
-    ax.scatter(x, y, s=5)
+    ax.plot(x, y, "-", lw=1)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("x")
     ax.set_ylabel("y")
