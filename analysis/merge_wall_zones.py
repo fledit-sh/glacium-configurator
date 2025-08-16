@@ -371,13 +371,40 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
     )
 
 
-def write_tecplot(path: Path, x: np.ndarray, y: np.ndarray, cp: np.ndarray):
+def write_tecplot(path: Path, nodes: np.ndarray, conn: np.ndarray, var_names: list[str]):
+    """Write merged wall data to a Tecplot ASCII file.
+
+    Parameters
+    ----------
+    path : Path
+        Output file location.
+    nodes : np.ndarray
+        Node data where the last column contains ``Cp`` values and the remaining
+        columns correspond to ``var_names``.
+    conn : np.ndarray
+        Element connectivity using zero-based node indices.
+    var_names : list[str]
+        Names for the columns in ``nodes`` excluding the final ``Cp`` column.
+    """
+
+    var_line = " ".join(f'"{v}"' for v in var_names + ["Cp"])
+    n_nodes = int(nodes.shape[0])
+    n_elem = int(conn.shape[0]) if conn is not None else 0
+
+    nodes_with_cp = nodes
+
     with open(path, "w") as f:
         f.write('TITLE = "Merged Wall Cp"\n')
-        f.write('VARIABLES = "X" "Y" "Cp"\n')
-        f.write(f'ZONE T="MergedWall", I={len(x)}, DATAPACKING=POINT\n')
-        for xi, yi, ci in zip(x, y, cp):
-            f.write(f"{xi} {yi} {ci}\n")
+        f.write(f'VARIABLES = {var_line}\n')
+        f.write(
+            f'ZONE T="MergedWall", N={n_nodes}, E={n_elem}, '  # type: ignore[fmt]
+            'DATAPACKING=POINT, ZONETYPE=FELINESEG\n'
+        )
+        for row in nodes_with_cp:
+            f.write(" ".join(str(v) for v in row) + "\n")
+        if conn is not None:
+            for a, b in conn:
+                f.write(f"{a + 1} {b + 1}\n")
 
 
 def merge_zones(
@@ -467,16 +494,8 @@ def merge_zones(
         end_global = offset + n - 1
         z.start = start_global
         z.end = end_global
-        # Koordinaten des letzten Endpunkts der vorherigen Zone
-        if prev_end is not None:
-            prev_coords = all_nodes[prev_end, [x_idx, y_idx]] if 'all_nodes' in locals() else nodes_list[-1][
-                -1, [x_idx, y_idx]]
-            start_coords = ordered_nodes[0, [x_idx, y_idx]]
-            end_coords = ordered_nodes[-1, [x_idx, y_idx]]
-            dist_start = np.linalg.norm(prev_coords - start_coords)
-            dist_end = np.linalg.norm(prev_coords - end_coords)
-            if dist_end < dist_start:
-                ordered_nodes = ordered_nodes[::-1]
+        # Previous orientation adjustments based on proximity are omitted to
+        # maintain a consistent monotonic ordering of ``x`` and ``Cp`` values.
 
         nodes_list.append(ordered_nodes)
         elem_list.append(
@@ -505,6 +524,14 @@ def merge_zones(
     y = nodes[:, y_idx]
     p = nodes[:, p_idx]
     cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
+
+    # Validate Cp continuity around the loop. Only flag extreme jumps which
+    # typically indicate corrupted data rather than expected pressure
+    # differences between surfaces.
+    if cp.size > 1:
+        cp_diff = np.abs(np.diff(np.append(cp, cp[0])))
+        if float(cp_diff.max()) > 10.0:
+            raise ValueError("Cp curve exhibits a discontinuity at the closing point")
 
     x_closed = np.append(x, x[0])
     y_closed = np.append(y, y[0])
@@ -586,7 +613,10 @@ def main():
         plot_surface_cp(x_closed, cp_closed, cp_path)
 
         if args.out:
-            write_tecplot(args.out, x_closed, y_closed, cp_closed)
+            nodes = np.column_stack([x_closed[:-1], y_closed[:-1], cp_closed[:-1]])
+            n = nodes.shape[0]
+            conn = np.column_stack([np.arange(n), np.roll(np.arange(n), -1)])
+            write_tecplot(args.out, nodes, conn, ["X", "Y"])
 
     sol_path = args.solution
     if sol_path.suffix.lower() == ".zip":
