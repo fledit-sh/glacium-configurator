@@ -461,7 +461,7 @@ def plot_cp_normals_outward(x, y, cp, scale=0.05):
 # plot_cp_normals_outward(x_closed, y_closed, cp_closed)
 
 
-def merge_zones(
+def _merge_zones_old(
     wall_zones: list[SimpleNamespace],
     inlet_zones: list[SimpleNamespace],
     var_map: dict[str, int],
@@ -623,6 +623,157 @@ def merge_zones(
     return x_closed, y_closed, cp_closed
 
 
+def merge_wall_nodes(
+    wall_zones: list[SimpleNamespace], var_map: dict[str, int]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Merge wall zones into an ordered node array and connectivity."""
+
+    idx = lambda *names: _get_var_index(var_map, list(names))
+    x_idx = idx("x")
+    y_idx = idx("y")
+
+    nodes_list: list[np.ndarray] = []
+    elem_list: list[np.ndarray] = []
+    offset = 0
+    prev_end = None
+
+    for z_idx, z in enumerate(wall_zones, start=1):
+        z_title = getattr(z, "title", "")
+        local_order, n_endpoints, is_closed = walk_zone_nodes(z)
+        if is_closed:
+            raise ValueError(
+                "Zone forms a closed loop; run a boundary-extraction step to obtain open boundary edges"
+            )
+        if n_endpoints == 0:
+            title_info = f" ({z_title})" if z_title else ""
+            raise ValueError(
+                f"Zone {z_idx}{title_info} has no endpoints; run a boundary-extraction step to generate boundary edges"
+            )
+        if n_endpoints != 2:
+            raise ValueError(f"Zone has {n_endpoints} endpoints; expected 2")
+
+        ordered_nodes = z.nodes[local_order]
+        if prev_end is not None and nodes_list:
+            prev_pt = nodes_list[-1][-1, [x_idx, y_idx]]
+            d_start = np.linalg.norm(ordered_nodes[0, [x_idx, y_idx]] - prev_pt)
+            d_end = np.linalg.norm(ordered_nodes[-1, [x_idx, y_idx]] - prev_pt)
+            if d_end < d_start:
+                ordered_nodes = ordered_nodes[::-1]
+
+        n = ordered_nodes.shape[0]
+        start_global = offset
+        end_global = offset + n - 1
+        z.start = start_global
+        z.end = end_global
+
+        nodes_list.append(ordered_nodes)
+        elem_list.append(
+            np.column_stack(
+                [
+                    np.arange(start_global, start_global + n - 1),
+                    np.arange(start_global + 1, start_global + n),
+                ]
+            )
+        )
+        if prev_end is not None:
+            elem_list.append(np.array([[prev_end, start_global]], dtype=int))
+        offset += n
+        prev_end = end_global
+
+    all_nodes = np.concatenate(nodes_list)
+    if prev_end is not None and all_nodes.size:
+        elem_list.append(np.array([[prev_end, wall_zones[0].start]], dtype=int))
+    all_elem = np.concatenate(elem_list) if elem_list else None
+
+    merged_zone = SimpleNamespace(nodes=all_nodes, elem=all_elem)
+    ord_idx, _, _ = walk_zone_nodes(merged_zone)
+    nodes = all_nodes[ord_idx]
+
+    if all_elem is None:
+        n_conn = nodes.shape[0]
+        conn_ordered = np.column_stack(
+            [np.arange(n_conn), np.roll(np.arange(n_conn), -1)]
+        )
+        return nodes, conn_ordered
+
+    rev_idx = np.empty_like(ord_idx)
+    rev_idx[ord_idx] = np.arange(len(ord_idx))
+    conn_ordered = rev_idx[all_elem]
+    closing = np.array([[nodes.shape[0] - 1, 0]], dtype=int)
+    if not np.any(np.all(conn_ordered == closing, axis=1)):
+        conn_ordered = np.vstack([conn_ordered, closing])
+
+    return nodes, conn_ordered
+
+
+def compute_cp(
+    nodes: np.ndarray,
+    var_map: dict[str, int],
+    inlet_zones: Optional[list[SimpleNamespace]] = None,
+) -> np.ndarray:
+    """Compute the pressure coefficient for merged wall nodes."""
+
+    idx = lambda *names: _get_var_index(var_map, list(names))
+    p_idx = idx("pressure", "p")
+    rho_idx = idx("density", "rho")
+    u_idx = idx("u", "velocityx", "xvelocity", "v1", "v1-velocity")
+    v_idx = idx("v", "velocityy", "yvelocity", "v2", "v2-velocity")
+    w_idx = idx("w", "velocityz", "zvelocity", "v3", "v3-velocity")
+
+    if inlet_zones:
+        inlet_nodes = np.concatenate([z.nodes for z in inlet_zones])
+        rho_inf = float(np.median(inlet_nodes[:, rho_idx]))
+        p_inf = float(np.median(inlet_nodes[:, p_idx]))
+        vel_mag = np.sqrt(
+            inlet_nodes[:, u_idx] ** 2
+            + inlet_nodes[:, v_idx] ** 2
+            + inlet_nodes[:, w_idx] ** 2
+        )
+        u_inf = float(np.median(vel_mag))
+    else:
+        first = nodes[0]
+        rho_inf = first[rho_idx]
+        p_inf = first[p_idx]
+        u_inf = float(
+            np.sqrt(first[u_idx] ** 2 + first[v_idx] ** 2 + first[w_idx] ** 2)
+        )
+
+    p = nodes[:, p_idx]
+    cp = (p - p_inf) / (0.5 * rho_inf * u_inf ** 2)
+
+    if cp.size > 1:
+        cp_diff = np.abs(np.diff(np.append(cp, cp[0])))
+        if float(cp_diff.max()) > 10.0:
+            raise ValueError("Cp curve exhibits a discontinuity at the closing point")
+
+    return cp
+
+
+def merge_zones(
+    wall_zones: list[SimpleNamespace],
+    inlet_zones: list[SimpleNamespace],
+    var_map: dict[str, int],
+    return_full: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray]:
+    """Backward compatible wrapper combining merge and Cp calculation."""
+
+    nodes, conn = merge_wall_nodes(wall_zones, var_map)
+    cp = compute_cp(nodes, var_map, inlet_zones)
+    x_idx = _get_var_index(var_map, ["x"])
+    y_idx = _get_var_index(var_map, ["y"])
+    x = nodes[:, x_idx]
+    y = nodes[:, y_idx]
+    x_closed = np.append(x, x[0])
+    y_closed = np.append(y, y[0])
+    cp_closed = np.append(cp, cp[0])
+
+    if return_full:
+        nodes_cp = np.column_stack([nodes, cp])
+        return nodes_cp, conn
+
+    return x_closed, y_closed, cp_closed
+
+
 def plot_airfoil_geometry(x: np.ndarray, y: np.ndarray, path: Path) -> None:
     fig, ax = plt.subplots()
     ax.scatter(x, y, s=5)
@@ -663,6 +814,9 @@ def main():
         default=0.0,
         help="Additional tolerance added to z-threshold",
     )
+    parser.add_argument("--merge-only", action="store_true", help="Only merge wall nodes")
+    parser.add_argument("--no-cp", action="store_true", help="Skip Cp computation")
+    parser.add_argument("--no-plots", action="store_true", help="Skip plot generation")
     args = parser.parse_args()
 
     prefix = args.solution.stem
@@ -689,37 +843,30 @@ def main():
         if not wall_zones:
             return
 
-        if args.out:
-            nodes_cp, conn_ordered = merge_zones(
-                wall_zones, inlet_zones, var_map, return_full=True
-            )
-            x_idx = _get_var_index(var_map, ["x"])
-            y_idx = _get_var_index(var_map, ["y"])
-            x = nodes_cp[:, x_idx]
-            y = nodes_cp[:, y_idx]
-            cp = nodes_cp[:, -1]
-            x_closed = np.append(x, x[0])
-            y_closed = np.append(y, y[0])
+        nodes, conn_ordered = merge_wall_nodes(wall_zones, var_map)
+        cp = None
+        if not (args.merge_only or args.no_cp):
+            cp = compute_cp(nodes, var_map, inlet_zones)
+
+        x_idx = _get_var_index(var_map, ["x"])
+        y_idx = _get_var_index(var_map, ["y"])
+        x = nodes[:, x_idx]
+        y = nodes[:, y_idx]
+        x_closed = np.append(x, x[0])
+        y_closed = np.append(y, y[0])
+        if cp is not None:
             cp_closed = np.append(cp, cp[0])
-        else:
-            x_closed, y_closed, cp_closed = merge_zones(
-                wall_zones, inlet_zones, var_map
-            )
 
-        # bestehende Plots
-        geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
-        cp_path = out_dir / f"{prefix}_surface_cp.png"
-        plot_airfoil_geometry(x_closed, y_closed, geom_path)
-        plot_surface_cp(x_closed, cp_closed, cp_path)
+        if not args.no_plots and not args.merge_only:
+            geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
+            plot_airfoil_geometry(x_closed, y_closed, geom_path)
+            if cp is not None:
+                cp_path = out_dir / f"{prefix}_surface_cp.png"
+                plot_surface_cp(x_closed, cp_closed, cp_path)
+                plot_cp_normals_outward(x_closed, y_closed, cp_closed, scale=0.05)
 
-        # NEU: Cp-Normalen-Plot
-        plot_cp_normals_outward(x_closed, y_closed, cp_closed, scale=0.05)
-
-        geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
-        cp_path = out_dir / f"{prefix}_surface_cp.png"
-        plot_airfoil_geometry(x_closed, y_closed, geom_path)
-        plot_surface_cp(x_closed, cp_closed, cp_path)
-        if args.out:
+        if args.out and cp is not None:
+            nodes_cp = np.column_stack([nodes, cp])
             write_tecplot(args.out, nodes_cp, conn_ordered, var_names)
 
     sol_path = args.solution

@@ -8,7 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
 import pytest
 
-from merge_wall_zones import merge_zones
+from merge_wall_zones import merge_wall_nodes
 
 
 def _node(x):
@@ -34,5 +34,5 @@ def test_merge_zones_no_endpoints_message():
     with pytest.raises(
         ValueError, match=r"Zone 1 \(TestZone\) has no endpoints"
     ):
-        merge_zones([zone], [], var_map)
+        merge_wall_nodes([zone], var_map)
 
