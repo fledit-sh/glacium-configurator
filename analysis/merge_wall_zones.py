@@ -5,10 +5,13 @@ from types import SimpleNamespace
 from typing import Optional
 import tempfile
 import zipfile
+from scipy.interpolate import CubicSpline
 
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import defaultdict
+import scienceplots
+plt.style.use("science")
 
 
 # Keywords used to automatically identify wall zones.  The search is case
@@ -406,6 +409,56 @@ def write_tecplot(path: Path, nodes: np.ndarray, conn: np.ndarray, var_names: li
             for a, b in conn:
                 f.write(f"{a + 1} {b + 1}\n")
 
+def plot_cp_normals_outward(x, y, cp, scale=0.05):
+    # Doppelte Punkte entfernen
+    coords = np.column_stack((x, y))
+    mask = np.ones(len(coords), dtype=bool)
+    mask[1:] = np.any(np.diff(coords, axis=0) != 0, axis=1)
+    x = x[mask]
+    y = y[mask]
+    cp = cp[mask]
+    # Schritt 1: Orientierung bestimmen (signed area)
+    area = 0.5 * np.sum(x[:-1]*y[1:] - x[1:]*y[:-1])
+    ccw = area > 0  # True = gegen Uhrzeigersinn
+
+    # Schritt 2: Tangenten
+    dx = np.gradient(x)
+    dy = np.gradient(y)
+
+    # Schritt 3: Normale immer nach außen
+    if ccw:
+        nx = dy
+        ny = -dx
+    else:
+        nx = -dy
+        ny = dx
+
+    # Normieren
+    norm = np.sqrt(nx**2 + ny**2)
+    nx /= norm
+    ny /= norm
+
+    # Schritt 4: Länge = |Cp| * scale
+    lengths = np.abs(cp) * scale
+
+    # Schritt 5: Farbe nach Vorzeichen von Cp
+    colors = ['red' if c > 0 else 'blue' for c in cp]
+
+    # Schritt 6: Plot
+    fig, ax = plt.subplots()
+    ax.plot(x, y, 'k-', lw=1)
+    for xi, yi, nxi, nyi, length, color in zip(x, y, nx, ny, lengths, colors):
+        ax.plot([xi, xi + nxi * length],
+                [yi, yi + nyi * length],
+                color=color, lw=1)
+
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_title("Cp-Normalen (immer nach außen)")
+    plt.show()
+
+# Beispiel:
+# plot_cp_normals_outward(x_closed, y_closed, cp_closed)
+
 
 def merge_zones(
     wall_zones: list[SimpleNamespace],
@@ -606,6 +659,18 @@ def main():
             return
 
         x_closed, y_closed, cp_closed = merge_zones(wall_zones, inlet_zones, var_map)
+
+        # bestehende Plots
+        geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
+        cp_path = out_dir / f"{prefix}_surface_cp.png"
+        plot_airfoil_geometry(x_closed, y_closed, geom_path)
+        plot_surface_cp(x_closed, cp_closed, cp_path)
+
+        # NEU: Cp-Normalen-Plot
+        plot_cp_normals_outward(x_closed, y_closed, cp_closed, scale=0.05)
+
+        if args.out:
+            write_tecplot(args.out, x_closed, y_closed, cp_closed)
 
         geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
         cp_path = out_dir / f"{prefix}_surface_cp.png"
