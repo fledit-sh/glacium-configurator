@@ -543,19 +543,18 @@ def merge_zones(
             raise ValueError(
                 f"Zone has {n_endpoints} endpoints; expected 2"
             )
-
         ordered_nodes = z.nodes[local_order]
         # Für die erste Zone keine Orientierung erzwingen.
         # Für nachfolgende Zonen: so orientieren, dass der erste Punkt
         # am nächsten zum Endpunkt der vorherigen Zone liegt.
 
         if prev_end is not None and len(nodes_list) > 0:
-            prev_pt = nodes_list[-1][0, [x_idx, y_idx]]
+            prev_pt = nodes_list[-1][-1, [x_idx, y_idx]]
             d_start = np.linalg.norm(ordered_nodes[0, [x_idx, y_idx]] - prev_pt)
             d_end = np.linalg.norm(ordered_nodes[-1, [x_idx, y_idx]] - prev_pt)
-
             if d_end < d_start:
                 ordered_nodes = ordered_nodes[::-1]
+
         n = ordered_nodes.shape[0]
         start_global = offset
         end_global = offset + n - 1
@@ -720,7 +719,6 @@ def main():
         cp_path = out_dir / f"{prefix}_surface_cp.png"
         plot_airfoil_geometry(x_closed, y_closed, geom_path)
         plot_surface_cp(x_closed, cp_closed, cp_path)
-
         if args.out:
             write_tecplot(args.out, nodes_cp, conn_ordered, var_names)
 
