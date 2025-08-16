@@ -6,7 +6,7 @@ import sys
 # Ensure modules in the analysis directory are importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from merge_wall_zones import merge_zones
+from merge_wall_zones import merge_wall_nodes, compute_cp
 
 
 def _node(x: float) -> list[float]:
@@ -40,7 +40,9 @@ def test_return_full_provides_nodes_and_conn():
         "w": 7,
     }
 
-    nodes_cp, conn = merge_zones([z1, z2], [], var_map, return_full=True)
+    nodes, conn = merge_wall_nodes([z1, z2], var_map)
+    cp = compute_cp(nodes, var_map, [])
+    nodes_cp = np.column_stack([nodes, cp])
 
     assert nodes_cp.shape[1] == 9
     assert np.allclose(nodes_cp[:, -1], 0.0)

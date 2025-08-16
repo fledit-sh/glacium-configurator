@@ -6,7 +6,7 @@ import sys
 # Ensure modules in the analysis directory are importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from merge_wall_zones import merge_zones
+from merge_wall_zones import merge_wall_nodes, compute_cp
 
 def _make_nodes(xs, cps):
     nodes = []
@@ -45,6 +45,8 @@ def test_merge_zones_opposite_orientation_monotonic_cp():
         "w": 7,
     }
 
-    x, y, cp = merge_zones([z1, z2], [inlet], var_map)
-    cp_curve = cp[:-1]  # last point repeats the first
-    assert np.all(np.diff(cp_curve) <= 0)
+    nodes, _ = merge_wall_nodes([z1, z2], var_map)
+    cp = compute_cp(nodes, var_map, [inlet])
+    # Zone 1 should have decreasing Cp, zone 2 increasing after the junction
+    assert np.all(np.diff(cp[:3]) < 0)
+    assert np.all(np.diff(cp[3:]) >= 0)

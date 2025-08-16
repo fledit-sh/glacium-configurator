@@ -6,7 +6,7 @@ import pytest
 # Ensure modules in the analysis directory are importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from merge_wall_zones import merge_zones, read_solution
+from merge_wall_zones import merge_wall_nodes, compute_cp, read_solution
 
 
 def _load():
@@ -17,8 +17,9 @@ def _load():
 
 def test_cp_loop_validation_passes():
     wall_zones, inlet_zones, var_map = _load()
+    nodes, _ = merge_wall_nodes(wall_zones, var_map)
     # Should not raise for the unmodified dataset
-    merge_zones(wall_zones, inlet_zones, var_map)
+    compute_cp(nodes, var_map, inlet_zones)
 
 
 def test_cp_loop_validation_fails_on_jump():
@@ -26,5 +27,6 @@ def test_cp_loop_validation_fails_on_jump():
     p_idx = var_map["p"]
     # Introduce a large pressure spike to trigger the Cp jump check
     wall_zones[-1].nodes[-1, p_idx] = 60.0
+    nodes, _ = merge_wall_nodes(wall_zones, var_map)
     with pytest.raises(ValueError):
-        merge_zones(wall_zones, inlet_zones, var_map)
+        compute_cp(nodes, var_map, inlet_zones)

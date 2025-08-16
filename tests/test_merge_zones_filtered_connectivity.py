@@ -6,7 +6,7 @@ import sys
 # Ensure modules in the analysis directory are importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from merge_wall_zones import merge_zones
+from merge_wall_zones import merge_wall_nodes
 
 
 def _node(x, z):
@@ -44,7 +44,9 @@ def test_connectivity_preserved_after_initial_z_filter():
         "w": 7,
     }
 
-    x_closed, y_closed, cp_closed = merge_zones([z1, z2], [], var_map)
+    nodes, _ = merge_wall_nodes([z1, z2], var_map)
+    x = nodes[:, var_map["x"]]
+    x_closed = np.append(x, x[0])
 
     # All four nodes should be present in the closed loop
     assert x_closed.shape[0] == 5  # four unique points + closure

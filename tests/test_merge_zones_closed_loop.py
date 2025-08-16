@@ -6,7 +6,7 @@ import sys
 # Ensure modules in the analysis directory are importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from merge_wall_zones import merge_zones
+from merge_wall_zones import merge_wall_nodes
 
 
 def _node(x):
@@ -35,7 +35,7 @@ def test_merge_zones_single_closed_loop():
     }
 
     with pytest.raises(ValueError, match="closed loop"):
-        merge_zones([zone], [], var_map)
+        merge_wall_nodes([zone], var_map)
 
 
 def test_merge_zones_multiple_closed_loops():
@@ -62,4 +62,4 @@ def test_merge_zones_multiple_closed_loops():
     }
 
     with pytest.raises(ValueError, match="closed loop"):
-        merge_zones([zone1, zone2], [], var_map)
+        merge_wall_nodes([zone1, zone2], var_map)

@@ -5,14 +5,16 @@ import sys
 # Ensure modules in the analysis directory are importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from merge_wall_zones import merge_zones, read_solution
+from merge_wall_zones import merge_wall_nodes, compute_cp, read_solution
 
 
 def test_return_full_on_sample_data_preserves_columns_and_connectivity():
     data_path = Path(__file__).with_name("sample_cp_loop.dat")
     wall_zones, inlet_zones, _, _, var_map, _, _, _ = read_solution(data_path)
 
-    nodes_cp, conn = merge_zones(wall_zones, inlet_zones, var_map, return_full=True)
+    nodes, conn = merge_wall_nodes(wall_zones, var_map)
+    cp = compute_cp(nodes, var_map, inlet_zones)
+    nodes_cp = np.column_stack([nodes, cp])
 
     # Node table should retain original variables and append Cp
     n_vars = wall_zones[0].nodes.shape[1]
@@ -28,16 +30,16 @@ def test_return_full_on_sample_data_preserves_columns_and_connectivity():
 
     # Reconstruct expected node ordering following orientation logic
     expected_nodes = []
-    prev_first = None
+    prev_end = None
     for z in wall_zones:
-        nodes = z.nodes
-        if prev_first is not None:
-            d_start = np.linalg.norm(nodes[0, [x_idx, y_idx]] - prev_first)
-            d_end = np.linalg.norm(nodes[-1, [x_idx, y_idx]] - prev_first)
+        nodes_arr = z.nodes
+        if prev_end is not None:
+            d_start = np.linalg.norm(nodes_arr[0, [x_idx, y_idx]] - prev_end)
+            d_end = np.linalg.norm(nodes_arr[-1, [x_idx, y_idx]] - prev_end)
             if d_end < d_start:
-                nodes = nodes[::-1]
-        expected_nodes.append(nodes)
-        prev_first = nodes[0, [x_idx, y_idx]]
+                nodes_arr = nodes_arr[::-1]
+        expected_nodes.append(nodes_arr)
+        prev_end = nodes_arr[-1, [x_idx, y_idx]]
     expected_nodes = np.vstack(expected_nodes)
 
     assert np.allclose(nodes_cp[:, :-1], expected_nodes)

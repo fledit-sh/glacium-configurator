@@ -5,7 +5,7 @@ import numpy as np
 # Ensure modules in the analysis directory are importable
 sys.path.append(str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from merge_wall_zones import read_solution, merge_zones
+from merge_wall_zones import read_solution, merge_wall_nodes
 
 
 def test_surface_zone_sliced_has_endpoints():
@@ -17,5 +17,5 @@ def test_surface_zone_sliced_has_endpoints():
     # Slicing should produce a single edge with two nodes at z=0
     assert zone.elem.shape == (1, 2)
     assert np.allclose(zone.nodes[:, 2], 0.0)
-    # merge_zones should process without raising the "no endpoints" error
-    merge_zones([zone], [], var_map)
+    # merge_wall_nodes should process without raising the "no endpoints" error
+    merge_wall_nodes([zone], var_map)
