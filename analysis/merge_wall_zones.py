@@ -369,6 +369,7 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
         total_nodes,
         wall_nodes,
         var_map,
+        var_names,
         wall_zone_indices,
         inlet_zone_indices,
     )
@@ -549,7 +550,7 @@ def merge_zones(
         # am nächsten zum Endpunkt der vorherigen Zone liegt.
 
         if prev_end is not None and len(nodes_list) > 0:
-            prev_pt = nodes_list[-1][-1, [x_idx, y_idx]]
+            prev_pt = nodes_list[-1][0, [x_idx, y_idx]]
             d_start = np.linalg.norm(ordered_nodes[0, [x_idx, y_idx]] - prev_pt)
             d_end = np.linalg.norm(ordered_nodes[-1, [x_idx, y_idx]] - prev_pt)
 
@@ -675,6 +676,7 @@ def main():
             total_nodes,
             wall_nodes,
             var_map,
+            var_names,
             wall_zone_indices,
             inlet_zone_indices,
         ) = read_solution(sol_path, args.z_threshold, args.tolerance)
@@ -688,7 +690,22 @@ def main():
         if not wall_zones:
             return
 
-        x_closed, y_closed, cp_closed = merge_zones(wall_zones, inlet_zones, var_map)
+        if args.out:
+            nodes_cp, conn_ordered = merge_zones(
+                wall_zones, inlet_zones, var_map, return_full=True
+            )
+            x_idx = _get_var_index(var_map, ["x"])
+            y_idx = _get_var_index(var_map, ["y"])
+            x = nodes_cp[:, x_idx]
+            y = nodes_cp[:, y_idx]
+            cp = nodes_cp[:, -1]
+            x_closed = np.append(x, x[0])
+            y_closed = np.append(y, y[0])
+            cp_closed = np.append(cp, cp[0])
+        else:
+            x_closed, y_closed, cp_closed = merge_zones(
+                wall_zones, inlet_zones, var_map
+            )
 
         # bestehende Plots
         geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
@@ -705,10 +722,7 @@ def main():
         plot_surface_cp(x_closed, cp_closed, cp_path)
 
         if args.out:
-            nodes = np.column_stack([x_closed[:-1], y_closed[:-1], cp_closed[:-1]])
-            n = nodes.shape[0]
-            conn = np.column_stack([np.arange(n), np.roll(np.arange(n), -1)])
-            write_tecplot(args.out, nodes, conn, ["X", "Y"])
+            write_tecplot(args.out, nodes_cp, conn_ordered, var_names)
 
     sol_path = args.solution
     if sol_path.suffix.lower() == ".zip":
