@@ -20,7 +20,7 @@ def test_write_tecplot_writes_expected_format(tmp_path):
     var_names = ["X", "Y", "Z", "P", "Rho", "U", "V", "W"]
 
     out_file = tmp_path / "out.dat"
-    write_tecplot(out_file, nodes, conn, var_names)
+    write_tecplot(out_file, nodes, conn, var_names, "Cp")
 
     text = out_file.read_text().splitlines()
 
