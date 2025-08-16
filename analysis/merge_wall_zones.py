@@ -411,7 +411,8 @@ def merge_zones(
     wall_zones: list[SimpleNamespace],
     inlet_zones: list[SimpleNamespace],
     var_map: dict[str, int],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    return_full: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray]:
     """Merge ordered wall zones and compute the closed Cp curve.
 
     Parameters
@@ -429,8 +430,10 @@ def merge_zones(
     Returns
     -------
     tuple of np.ndarray
-        The closed ``x``, ``y`` and ``Cp`` arrays describing the airfoil
-        surface.
+        If ``return_full`` is ``False`` (default), returns the closed ``x``,
+        ``y`` and ``Cp`` arrays describing the airfoil surface.  When
+        ``return_full`` is ``True`` the full node array with an appended ``Cp``
+        column and the corresponding connectivity are returned instead.
     """
 
     idx = lambda *names: _get_var_index(var_map, list(names))
@@ -533,9 +536,27 @@ def merge_zones(
         if float(cp_diff.max()) > 10.0:
             raise ValueError("Cp curve exhibits a discontinuity at the closing point")
 
+    nodes_cp = np.column_stack([nodes, cp])
+
+    if all_elem is None:
+        n_conn = nodes_cp.shape[0]
+        conn_ordered = np.column_stack(
+            [np.arange(n_conn), np.roll(np.arange(n_conn), -1)]
+        )
+    else:
+        rev_idx = np.empty_like(ord_idx)
+        rev_idx[ord_idx] = np.arange(len(ord_idx))
+        conn_ordered = rev_idx[all_elem]
+        closing = np.array([[nodes_cp.shape[0] - 1, 0]], dtype=int)
+        if not np.any(np.all(conn_ordered == closing, axis=1)):
+            conn_ordered = np.vstack([conn_ordered, closing])
+
     x_closed = np.append(x, x[0])
     y_closed = np.append(y, y[0])
     cp_closed = np.append(cp, cp[0])
+
+    if return_full:
+        return nodes_cp, conn_ordered
 
     return x_closed, y_closed, cp_closed
 
