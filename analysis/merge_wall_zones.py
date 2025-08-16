@@ -542,16 +542,25 @@ def merge_zones(
             raise ValueError(
                 f"Zone has {n_endpoints} endpoints; expected 2"
             )
+
         ordered_nodes = z.nodes[local_order]
-        if ordered_nodes[-1, x_idx] > ordered_nodes[0, x_idx]:
-            ordered_nodes = ordered_nodes[::-1]
+        # Für die erste Zone keine Orientierung erzwingen.
+        # Für nachfolgende Zonen: so orientieren, dass der erste Punkt
+        # am nächsten zum Endpunkt der vorherigen Zone liegt.
+
+        if prev_end is not None and len(nodes_list) > 0:
+            prev_pt = nodes_list[-1][-1, [x_idx, y_idx]]
+            d_start = np.linalg.norm(ordered_nodes[0, [x_idx, y_idx]] - prev_pt)
+            d_end = np.linalg.norm(ordered_nodes[-1, [x_idx, y_idx]] - prev_pt)
+
+            if d_end < d_start:
+                ordered_nodes = ordered_nodes[::-1]
         n = ordered_nodes.shape[0]
         start_global = offset
         end_global = offset + n - 1
         z.start = start_global
         z.end = end_global
-        # Previous orientation adjustments based on proximity are omitted to
-        # maintain a consistent monotonic ordering of ``x`` and ``Cp`` values.
+
 
         nodes_list.append(ordered_nodes)
         elem_list.append(
@@ -689,9 +698,6 @@ def main():
 
         # NEU: Cp-Normalen-Plot
         plot_cp_normals_outward(x_closed, y_closed, cp_closed, scale=0.05)
-
-        if args.out:
-            write_tecplot(args.out, x_closed, y_closed, cp_closed)
 
         geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
         cp_path = out_dir / f"{prefix}_surface_cp.png"
