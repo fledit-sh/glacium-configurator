@@ -3,7 +3,8 @@
 ## `merge_wall_zones.py`
 
 This script merges wall zones from a Tecplot solution and produces basic
-validation plots.
+validation plots.  The calculation to perform on the merged wall nodes is
+selected via the ``--calc`` option (default: ``cp``).
 
 ### Expected Outputs
 
@@ -19,12 +20,24 @@ solution when `--out` is omitted):
 - `*_airfoil_geometry.png` – scatter plot of the wall nodes in their
   merged order. The points should trace a closed airfoil shape.
 - `*_surface_cp.png` – surface pressure coefficient plotted against the
-  ordered `x` coordinate. The curve should follow the expected Cp
-  distribution for the case and can be compared against reference data
-  for validation.
+  ordered `x` coordinate when ``--calc cp`` is used. The curve should follow
+  the expected Cp distribution for the case and can be compared against
+  reference data for validation.
 
-The optional Tecplot file produced by `--out` contains the same ordered
-`x`, `y` and `Cp` data.
+The optional Tecplot file produced by ``--out`` contains the ordered ``x``,
+``y`` and the selected derived quantity.
+
+### Adding custom calculations
+
+Derived quantities are dispatched through the ``CALC_HANDLERS`` mapping in
+``merge_wall_zones.py``.  To extend the script:
+
+1. Implement a function ``compute_*`` accepting ``nodes``, ``var_map`` and an
+   optional ``inlet_zones`` list and returning a one-dimensional NumPy array
+   with one value per node.
+2. Add the function to ``CALC_HANDLERS`` and provide a label in
+   ``CALC_LABELS``.
+3. Invoke the script with ``--calc <name>`` to run the custom calculation.
 
 ### Boundary edges and automatic slicing
 

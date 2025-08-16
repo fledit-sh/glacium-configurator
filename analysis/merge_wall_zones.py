@@ -375,36 +375,42 @@ def read_solution(path: Path, z_threshold: float = 0.0, tol: float = 0.0):
     )
 
 
-def write_tecplot(path: Path, nodes: np.ndarray, conn: np.ndarray, var_names: list[str]):
-    """Write merged wall data to a Tecplot ASCII file.
+def write_tecplot(
+    path: Path,
+    nodes: np.ndarray,
+    conn: np.ndarray,
+    var_names: list[str],
+    calc_name: str,
+) -> None:
+    """Write merged wall data and a derived quantity to a Tecplot ASCII file.
 
     Parameters
     ----------
     path : Path
         Output file location.
     nodes : np.ndarray
-        Node data where the last column contains ``Cp`` values and the remaining
-        columns correspond to ``var_names``.
+        Node data where the last column contains the derived quantity values
+        and the remaining columns correspond to ``var_names``.
     conn : np.ndarray
         Element connectivity using zero-based node indices.
     var_names : list[str]
-        Names for the columns in ``nodes`` excluding the final ``Cp`` column.
+        Names for the columns in ``nodes`` excluding the final derived column.
+    calc_name : str
+        Name of the derived quantity to append as the final Tecplot variable.
     """
 
-    var_line = " ".join(f'"{v}"' for v in var_names + ["Cp"])
+    var_line = " ".join(f'"{v}"' for v in var_names + [calc_name])
     n_nodes = int(nodes.shape[0])
     n_elem = int(conn.shape[0]) if conn is not None else 0
 
-    nodes_with_cp = nodes
-
     with open(path, "w") as f:
-        f.write('TITLE = "Merged Wall Cp"\n')
+        f.write(f'TITLE = "Merged Wall {calc_name}"\n')
         f.write(f'VARIABLES = {var_line}\n')
         f.write(
-            f'ZONE T="MergedWall", N={n_nodes}, E={n_elem}, '  # type: ignore[fmt]
+            f'ZONE T="MergedWall", N={n_nodes}, E={n_elem}, '
             'DATAPACKING=POINT, ZONETYPE=FELINESEG\n'
         )
-        for row in nodes_with_cp:
+        for row in nodes:
             f.write(" ".join(str(v) for v in row) + "\n")
         if conn is not None:
             for a, b in conn:
@@ -749,29 +755,96 @@ def compute_cp(
     return cp
 
 
+def compute_speed(
+    nodes: np.ndarray,
+    var_map: dict[str, int],
+    inlet_zones: Optional[list[SimpleNamespace]] = None,
+) -> np.ndarray:
+    """Return the velocity magnitude for each node."""
+
+    idx = lambda *names: _get_var_index(var_map, list(names))
+    u_idx = idx("u", "velocityx", "xvelocity", "v1", "v1-velocity")
+    v_idx = idx("v", "velocityy", "yvelocity", "v2", "v2-velocity")
+    w_idx = idx("w", "velocityz", "zvelocity", "v3", "v3-velocity")
+    u = nodes[:, u_idx]
+    v = nodes[:, v_idx]
+    w = nodes[:, w_idx]
+    return np.sqrt(u ** 2 + v ** 2 + w ** 2)
+
+
+def compute_dynamic_pressure(
+    nodes: np.ndarray,
+    var_map: dict[str, int],
+    inlet_zones: Optional[list[SimpleNamespace]] = None,
+) -> np.ndarray:
+    """Return dynamic pressure ``0.5 * rho * V^2`` for each node."""
+
+    idx = lambda *names: _get_var_index(var_map, list(names))
+    rho_idx = idx("density", "rho")
+    u_idx = idx("u", "velocityx", "xvelocity", "v1", "v1-velocity")
+    v_idx = idx("v", "velocityy", "yvelocity", "v2", "v2-velocity")
+    w_idx = idx("w", "velocityz", "zvelocity", "v3", "v3-velocity")
+    rho = nodes[:, rho_idx]
+    u = nodes[:, u_idx]
+    v = nodes[:, v_idx]
+    w = nodes[:, w_idx]
+    vel_sq = u ** 2 + v ** 2 + w ** 2
+    return 0.5 * rho * vel_sq
+
+
+CALC_HANDLERS = {
+    "cp": compute_cp,
+    "speed": compute_speed,
+    "dynamic_pressure": compute_dynamic_pressure,
+}
+
+CALC_LABELS = {
+    "cp": "Cp",
+    "speed": "Speed",
+    "dynamic_pressure": "DynamicPressure",
+}
+
+
 def merge_zones(
     wall_zones: list[SimpleNamespace],
     inlet_zones: list[SimpleNamespace],
     var_map: dict[str, int],
+    calc: str = "cp",
     return_full: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray]:
-    """Backward compatible wrapper combining merge and Cp calculation."""
+    """Backward compatible wrapper combining merge and calculation.
+
+    Parameters
+    ----------
+    wall_zones : list of SimpleNamespace
+        Zones containing ``nodes`` and optional ``elem`` arrays.
+    inlet_zones : list of SimpleNamespace
+        Zones used to estimate free–stream conditions. May be empty.
+    var_map : dict
+        Mapping from normalized variable names to column indices.
+    calc : str, optional
+        Name of the derived quantity to compute. Defaults to ``"cp"``.
+    return_full : bool, optional
+        When ``True`` returns the full node table with the derived column and
+        connectivity. Otherwise returns closed ``x``, ``y`` and derived arrays.
+    """
 
     nodes, conn = merge_wall_nodes(wall_zones, var_map)
-    cp = compute_cp(nodes, var_map, inlet_zones)
+    calc_fn = CALC_HANDLERS[calc]
+    vals = calc_fn(nodes, var_map, inlet_zones)
     x_idx = _get_var_index(var_map, ["x"])
     y_idx = _get_var_index(var_map, ["y"])
     x = nodes[:, x_idx]
     y = nodes[:, y_idx]
     x_closed = np.append(x, x[0])
     y_closed = np.append(y, y[0])
-    cp_closed = np.append(cp, cp[0])
+    vals_closed = np.append(vals, vals[0])
 
     if return_full:
-        nodes_cp = np.column_stack([nodes, cp])
-        return nodes_cp, conn
+        nodes_vals = np.column_stack([nodes, vals])
+        return nodes_vals, conn
 
-    return x_closed, y_closed, cp_closed
+    return x_closed, y_closed, vals_closed
 
 
 def plot_airfoil_geometry(x: np.ndarray, y: np.ndarray, path: Path) -> None:
@@ -821,7 +894,12 @@ def main():
         help="Additional tolerance added to z-threshold",
     )
     parser.add_argument("--merge-only", action="store_true", help="Only merge wall nodes")
-    parser.add_argument("--no-cp", action="store_true", help="Skip Cp computation")
+    parser.add_argument(
+        "--calc",
+        choices=sorted(CALC_HANDLERS.keys()),
+        default="cp",
+        help="Derived quantity to compute",
+    )
     parser.add_argument("--no-plots", action="store_true", help="Skip plot generation")
     args = parser.parse_args()
 
@@ -850,9 +928,10 @@ def main():
             return
 
         nodes, conn_ordered = merge_wall_nodes(wall_zones, var_map)
-        cp = None
-        if not (args.merge_only or args.no_cp):
-            cp = compute_cp(nodes, var_map, inlet_zones)
+        vals = None
+        if not args.merge_only:
+            calc_fn = CALC_HANDLERS[args.calc]
+            vals = calc_fn(nodes, var_map, inlet_zones)
 
         x_idx = _get_var_index(var_map, ["x"])
         y_idx = _get_var_index(var_map, ["y"])
@@ -860,20 +939,21 @@ def main():
         y = nodes[:, y_idx]
         x_closed = np.append(x, x[0])
         y_closed = np.append(y, y[0])
-        if cp is not None:
-            cp_closed = np.append(cp, cp[0])
+        if vals is not None:
+            vals_closed = np.append(vals, vals[0])
 
         if not args.no_plots and not args.merge_only:
             geom_path = out_dir / f"{prefix}_airfoil_geometry.png"
             plot_airfoil_geometry(x_closed, y_closed, geom_path)
-            if cp is not None:
+            if vals is not None and args.calc == "cp":
                 cp_path = out_dir / f"{prefix}_surface_cp.png"
-                plot_surface_cp(x_closed, cp_closed, cp_path)
-                plot_cp_normals_outward(x_closed, y_closed, cp_closed, scale=0.05)
+                plot_surface_cp(x_closed, vals_closed, cp_path)
+                plot_cp_normals_outward(x_closed, y_closed, vals_closed, scale=0.05)
 
-        if args.out and cp is not None:
-            nodes_cp = np.column_stack([nodes, cp])
-            write_tecplot(args.out, nodes_cp, conn_ordered, var_names)
+        if args.out and vals is not None:
+            nodes_vals = np.column_stack([nodes, vals])
+            label = CALC_LABELS.get(args.calc, args.calc)
+            write_tecplot(args.out, nodes_vals, conn_ordered, var_names, label)
 
     sol_path = args.solution
     if sol_path.suffix.lower() == ".zip":
