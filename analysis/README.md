@@ -1,5 +1,17 @@
 # Analysis Tools
 
+## `run_multishot.py`
+
+Batch utility to process multiple shots. It scans an input directory for three `.dat` or `.zip` files per six-digit shot ID and runs the standard analysis pipeline for each.
+
+### Usage
+
+```bash
+python run_multishot.py --input-dir INPUT --output-dir OUTPUT [--start-shot N] [--end-shot M]
+```
+
+Results for each shot are written to `<output>/<shot_id>/`.
+
 ## `merge_wall_zones.py`
 
 This script merges wall zones from a Tecplot solution and produces basic
