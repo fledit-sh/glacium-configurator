@@ -12,6 +12,13 @@ Running the script with
 
 ```bash
 python merge_wall_zones.py /path/to/solution.dat --out /path/to/merged_wall.dat
+python walker.py merged.dat --out conn.gif --fps 24 --frames 400 --dot 10
+python 02_correlate.py merged.dat --outdir correlation_analysis
+python 01_plot.py merged.dat --outdir plots
+python 00_merge.py soln.fensap.000001.dat --augment droplet.drop.000001.dat --augment-prefix droplet --augment swimsol.ice.000001.dat --augment-prefix swim --out merged.dat --merge-only --no-plots 
+
+letzteres muss überarbeitet werden, da das profil nicht geschlossen ist (!N=E)
+schauen, dass diese tripel vor der plotterei verarbeitet werden.
 ```
 
 creates the following files next to the output location (or the input
