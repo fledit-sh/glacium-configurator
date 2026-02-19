@@ -89,13 +89,13 @@ def device_page(conn, serial: str):
             st.divider()
 
     if is_admin_logged_in():
-        st.subheader("Admin: Dokument hochladen")
-        doc_type = st.text_input("Dokumenttyp (z.B. DoC, Manual, TestReport)")
+        st.subheader("Admin: Upload document")
+        doc_type = st.text_input("Documenttype (i.e. DoC, Manual, TestReport)")
         doc_version = st.text_input("Version (z.B. 1.0.2)")
-        up = st.file_uploader("PDF hochladen", type=["pdf"])
-        if st.button("Speichern") and up and doc_type and doc_version:
+        up = st.file_uploader("Upload pdf", type="pdf")
+        if st.button("Save") and up and doc_type and doc_version:
             save_doc(conn, serial, doc_type, doc_version, up.getvalue(), up.name)
-            st.success("Gespeichert.")
+            st.success("Saved.")
             st.rerun()
 
 def main():
@@ -107,7 +107,7 @@ def main():
     serial = q.get("sn", None)
 
     st.sidebar.subheader("Navigation")
-    sn_input = st.sidebar.text_input("Seriennummer öffnen", value=serial or "")
+    sn_input = st.sidebar.text_input("Open serial number", value=serial or "")
     if st.sidebar.button("Öffnen") and sn_input:
         st.query_params["sn"] = sn_input
         st.rerun()
