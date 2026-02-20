@@ -137,7 +137,7 @@ def main():
     if not serial:
         st.title("Traceability Portal (MVP)")
         st.write("Open a serial number via the sidebar or using a QR-code URL:")
-        st.code("https://your-app.streamlit.app/?sn=KM1-000123")
+        st.code("http://172.17.220.84:8501/?sn=KM1-000001")
         st.stop()
 
     device_page(conn, serial)
